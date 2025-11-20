@@ -1,0 +1,25 @@
+# Exile Architect - Data Scraper Cron Jobs
+# Add these to your crontab: crontab -e
+
+# Scrape all data daily at 3 AM
+0 3 * * * cd /var/www/exile-architect && /usr/bin/php cli/scraper.php --task=all >> /var/log/exile-scraper.log 2>&1
+
+# Update poe.ninja data every 6 hours
+0 */6 * * * cd /var/www/exile-architect && /usr/bin/php cli/scraper.php --task=poeninja >> /var/log/exile-scraper.log 2>&1
+
+# Scrape passive tree weekly (Monday at 4 AM)
+0 4 * * 1 cd /var/www/exile-architect && /usr/bin/php cli/scraper.php --task=tree >> /var/log/exile-scraper.log 2>&1
+
+# Backup database daily at 2 AM
+0 2 * * * /usr/bin/mysqldump -u exile_user -p'exile_pass' exile_architect > /var/backups/exile-architect/db_$(date +\%Y\%m\%d).sql 2>&1
+
+# Clean old backups (keep last 7 days)
+0 5 * * * find /var/backups/exile-architect -name "db_*.sql" -mtime +7 -delete
+
+# NOTES:
+# - Adjust paths according to your installation
+# - Change database credentials
+# - Ensure log directory exists: mkdir -p /var/log
+# - Ensure backup directory exists: mkdir -p /var/backups/exile-architect
+# - Make scripts executable: chmod +x cli/*.php
+# - Test manually before adding to cron
