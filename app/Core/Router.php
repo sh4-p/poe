@@ -12,7 +12,7 @@ class Router
 {
     private array $routes = [];
     private array $middleware = [];
-    private ?string $currentRoute = null;
+    private ?int $currentRoute = null;
 
     /**
      * Add GET route
