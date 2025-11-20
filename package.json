@@ -1,0 +1,23 @@
+{
+  "name": "exile-architect",
+  "version": "1.0.0",
+  "description": "Advanced Path of Exile Build Planner",
+  "scripts": {
+    "dev": "tailwindcss -i ./public/assets/css/input.css -o ./public/assets/css/output.css --watch",
+    "build": "tailwindcss -i ./public/assets/css/input.css -o ./public/assets/css/output.css --minify",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose up -d --build"
+  },
+  "keywords": [
+    "path-of-exile",
+    "build-planner",
+    "gaming",
+    "ai"
+  ],
+  "author": "Exile Architect Team",
+  "license": "MIT",
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

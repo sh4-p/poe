@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="{{ description|default('Advanced Path of Exile Build Planner') }}">
+    <title>{{ title|default('Exile Architect') }} | {{ app_name }}</title>
+
+    {# Tailwind CSS CDN (for development - will be compiled later) #}
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    {# Custom styles #}
+    <style>
+        :root {
+            --poe-dark: #1a1a1a;
+            --poe-brown: #38250e;
+            --poe-gold: #af8551;
+            --poe-unique: #af5025;
+            --poe-rare: #ffff77;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+    </style>
+
+    {% block styles %}{% endblock %}
+</head>
+<body class="bg-gray-900 text-gray-100">
+    {# Navigation #}
+    <nav class="bg-gray-800 border-b border-gray-700">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/" class="text-xl font-bold text-yellow-500 hover:text-yellow-400">
+                        ⚔️ Exile Architect
+                    </a>
+                    <div class="hidden md:block ml-10">
+                        <div class="flex items-baseline space-x-4">
+                            <a href="/features" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Features</a>
+                            <a href="/builds" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Builds</a>
+                            <a href="/about" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">About</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    {% if user %}
+                        <a href="/dashboard" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Dashboard</a>
+                        <a href="/my-builds" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">My Builds</a>
+                        <form action="/logout" method="POST" class="inline">
+                            <button type="submit" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Logout</button>
+                        </form>
+                    {% else %}
+                        <a href="/login" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Login</a>
+                        <a href="/register" class="px-4 py-2 rounded-md text-sm font-medium bg-yellow-600 hover:bg-yellow-700">Register</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    {# Flash messages #}
+    {% if session.flash_message %}
+        <div class="container mx-auto px-4 mt-4">
+            <div class="bg-blue-500 text-white px-4 py-3 rounded relative" role="alert">
+                {{ session.flash_message }}
+            </div>
+        </div>
+    {% endif %}
+
+    {# Main content #}
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    {# Footer #}
+    <footer class="bg-gray-800 border-t border-gray-700 mt-20">
+        <div class="container mx-auto px-4 py-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div>
+                    <h3 class="text-lg font-bold text-yellow-500 mb-4">Exile Architect</h3>
+                    <p class="text-gray-400 text-sm">
+                        Advanced Path of Exile build planner with AI-powered build generation.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-yellow-500 mb-4">Quick Links</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="/features" class="text-gray-400 hover:text-white">Features</a></li>
+                        <li><a href="/builds" class="text-gray-400 hover:text-white">Browse Builds</a></li>
+                        <li><a href="/about" class="text-gray-400 hover:text-white">About</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-yellow-500 mb-4">Resources</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="https://www.pathofexile.com" target="_blank" class="text-gray-400 hover:text-white">Official PoE Site</a></li>
+                        <li><a href="https://www.poewiki.net" target="_blank" class="text-gray-400 hover:text-white">PoE Wiki</a></li>
+                        <li><a href="https://poe.ninja" target="_blank" class="text-gray-400 hover:text-white">poe.ninja</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-gray-700 mt-8 pt-8 text-center text-sm text-gray-400">
+                <p>&copy; {{ "now"|date("Y") }} Exile Architect. Built with ⚔️ for the PoE community.</p>
+            </div>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

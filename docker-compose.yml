@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # Nginx Web Server
+  nginx:
+    image: nginx:alpine
+    container_name: exile_nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - php
+    networks:
+      - exile_network
+
+  # PHP-FPM
+  php:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    container_name: exile_php
+    volumes:
+      - ./:/var/www/html
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=exile_architect
+      - DB_USERNAME=exile_user
+      - DB_PASSWORD=exile_pass
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - exile_network
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: exile_mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: exile_architect
+      MYSQL_USER: exile_user
+      MYSQL_PASSWORD: exile_pass
+      MYSQL_ROOT_PASSWORD: root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - exile_network
+
+  # Redis Cache
+  redis:
+    image: redis:alpine
+    container_name: exile_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - exile_network
+
+  # PHPMyAdmin (optional, for development)
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: exile_phpmyadmin
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: root_password
+    depends_on:
+      - mysql
+    networks:
+      - exile_network
+
+volumes:
+  mysql_data:
+
+networks:
+  exile_network:
+    driver: bridge

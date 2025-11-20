@@ -1,0 +1,67 @@
+{% extends "layouts/base.twig" %}
+
+{% block content %}
+    <div class="container mx-auto px-4 py-12">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-4xl font-bold mb-8 text-yellow-500">About Exile Architect</h1>
+
+            <div class="prose prose-invert max-w-none">
+                <div class="bg-gray-800 p-8 rounded-lg mb-8">
+                    <h2 class="text-2xl font-bold mb-4 text-yellow-500">Our Mission</h2>
+                    <p class="text-gray-300 text-lg leading-relaxed">
+                        Exile Architect was created to empower Path of Exile players with the most advanced build planning tools available. We combine cutting-edge AI technology with comprehensive game data to help you create, optimize, and perfect your character builds.
+                    </p>
+                </div>
+
+                <div class="bg-gray-800 p-8 rounded-lg mb-8">
+                    <h2 class="text-2xl font-bold mb-4 text-yellow-500">What We Offer</h2>
+                    <ul class="space-y-4 text-gray-300">
+                        <li class="flex items-start">
+                            <span class="text-yellow-500 mr-2">✓</span>
+                            <span><strong>AI Build Generation:</strong> Leverage Google Gemini AI to generate optimized builds based on your preferences.</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-500 mr-2">✓</span>
+                            <span><strong>Interactive Passive Tree:</strong> Explore the passive skill tree with pan, zoom, and search functionality.</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-500 mr-2">✓</span>
+                            <span><strong>Comprehensive Database:</strong> Access detailed information on all uniques, base items, and skill gems.</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-500 mr-2">✓</span>
+                            <span><strong>Mobile-First Design:</strong> Plan your builds on any device with our responsive interface.</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-500 mr-2">✓</span>
+                            <span><strong>Real-Time Updates:</strong> Stay current with automatic data synchronization from official sources.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="bg-gray-800 p-8 rounded-lg">
+                    <h2 class="text-2xl font-bold mb-4 text-yellow-500">Technology Stack</h2>
+                    <p class="text-gray-300 mb-4">Built with modern, efficient technologies:</p>
+                    <div class="grid grid-cols-2 gap-4 text-gray-300">
+                        <div>
+                            <strong class="text-yellow-500">Backend:</strong>
+                            <ul class="ml-4 mt-2">
+                                <li>• PHP 8.2+ (Custom MVC)</li>
+                                <li>• MySQL 8.0</li>
+                                <li>• Redis Caching</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <strong class="text-yellow-500">Frontend:</strong>
+                            <ul class="ml-4 mt-2">
+                                <li>• Vanilla JavaScript (ES6+)</li>
+                                <li>• Tailwind CSS</li>
+                                <li>• D3.js for visualizations</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

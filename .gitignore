@@ -1,0 +1,55 @@
+# Environment variables
+.env
+
+# Composer
+/vendor/
+composer.lock
+
+# NPM/Node
+/node_modules/
+package-lock.json
+npm-debug.log
+yarn.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+/logs/*.log
+/storage/logs/*.log
+*.log
+
+# Cache
+/cache/*
+!/cache/.gitkeep
+/storage/cache/*
+
+# Uploaded files
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# Build artifacts
+/public/assets/css/*.css
+/public/assets/js/dist/
+/dist/
+
+# Database
+*.sqlite
+*.db
+
+# Backup files
+*.backup
+*.bak
+*.sql
+
+# Compiled assets
+/public/mix-manifest.json
+/public/hot
