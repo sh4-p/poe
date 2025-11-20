@@ -1,0 +1,167 @@
+{% extends "layouts/base.twig" %}
+
+{% block content %}
+    <div class="bg-gray-900 min-h-screen">
+        {# Top Toolbar #}
+        <div class="bg-gray-800 border-b border-gray-700 sticky top-0 z-50">
+            <div class="container mx-auto px-4 py-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <a href="/my-builds" class="text-gray-400 hover:text-white">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                            </svg>
+                        </a>
+                        <div>
+                            <h1 class="text-xl font-bold text-white">{{ build.build_name }}</h1>
+                            <p class="text-sm text-gray-400">{{ build.ascendancy_class }}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button id="save-build-btn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm transition-all">
+                            Save
+                        </button>
+                        <span id="save-status" class="text-sm text-gray-400"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {# Main Build Editor #}
+        <div class="container mx-auto px-4 py-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {# Left Panel - Build Configuration #}
+                <div class="lg:col-span-1 space-y-6">
+                    {# Build Info #}
+                    <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                        <h2 class="text-lg font-bold text-yellow-500 mb-4">Build Information</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Build Name</label>
+                                <input
+                                    type="text"
+                                    id="build_name"
+                                    value="{{ build.build_name }}"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                                >
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Ascendancy</label>
+                                <select
+                                    id="ascendancy_class"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                                >
+                                    {% for asc in ascendancies %}
+                                        <option value="{{ asc }}" {% if asc == build.ascendancy_class %}selected{% endif %}>{{ asc }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Visibility</label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        id="is_public"
+                                        {% if build.is_public %}checked{% endif %}
+                                        class="h-4 w-4 text-yellow-600 focus:ring-yellow-500 border-gray-600 rounded"
+                                    >
+                                    <span class="ml-2 text-sm text-gray-300">Public</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    {# Items Placeholder #}
+                    <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                        <h2 class="text-lg font-bold text-yellow-500 mb-4">Equipment</h2>
+                        <div class="text-center text-gray-500 py-8">
+                            <p>Item selector coming in Phase 3.4</p>
+                        </div>
+                    </div>
+
+                    {# Skills Placeholder #}
+                    <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                        <h2 class="text-lg font-bold text-yellow-500 mb-4">Skill Gems</h2>
+                        <div class="text-center text-gray-500 py-8">
+                            <p>Gem selector coming in Phase 3.4</p>
+                        </div>
+                    </div>
+                </div>
+
+                {# Center Panel - Passive Tree #}
+                <div class="lg:col-span-2">
+                    <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
+                        <h2 class="text-lg font-bold text-yellow-500 mb-4">Passive Skill Tree</h2>
+                        <div id="passive-tree-container" class="bg-gray-900 rounded-lg border border-gray-700 h-[600px] flex items-center justify-center">
+                            <div class="text-center text-gray-500">
+                                <svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                                </svg>
+                                <p class="text-lg">Passive Tree Viewer</p>
+                                <p class="text-sm">Coming in Phase 3.5</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const buildId = {{ build.id }};
+let saveTimeout;
+
+// Auto-save on input change
+function scheduleAutoSave() {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(saveBuild, 2000);
+}
+
+document.getElementById('build_name').addEventListener('input', scheduleAutoSave);
+document.getElementById('ascendancy_class').addEventListener('change', scheduleAutoSave);
+document.getElementById('is_public').addEventListener('change', scheduleAutoSave);
+
+async function saveBuild() {
+    const statusEl = document.getElementById('save-status');
+    statusEl.textContent = 'Saving...';
+    statusEl.className = 'text-sm text-yellow-400';
+
+    const data = {
+        build_id: buildId,
+        build_info: {
+            build_name: document.getElementById('build_name').value,
+            ascendancy_class: document.getElementById('ascendancy_class').value,
+            is_public: document.getElementById('is_public').checked ? 1 : 0
+        }
+    };
+
+    try {
+        const response = await fetch('/build/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            statusEl.textContent = 'Saved ✓';
+            statusEl.className = 'text-sm text-green-400';
+            setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        } else {
+            statusEl.textContent = 'Save failed';
+            statusEl.className = 'text-sm text-red-400';
+        }
+    } catch (error) {
+        statusEl.textContent = 'Network error';
+        statusEl.className = 'text-sm text-red-400';
+    }
+}
+
+// Manual save button
+document.getElementById('save-build-btn').addEventListener('click', saveBuild);
+</script>
+{% endblock %}

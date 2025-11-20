@@ -1,0 +1,160 @@
+{% extends "layouts/base.twig" %}
+
+{% block content %}
+    <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-md w-full space-y-8">
+            {# Header #}
+            <div class="text-center">
+                <h2 class="text-4xl font-bold text-yellow-500 mb-2">Create Account</h2>
+                <p class="text-gray-400">Join the Exile Architect community</p>
+            </div>
+
+            {# Error messages #}
+            {% if errors.general %}
+                <div class="bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded relative" role="alert">
+                    <span class="block sm:inline">{{ errors.general }}</span>
+                </div>
+            {% endif %}
+
+            {# Registration Form #}
+            <form class="mt-8 space-y-6 bg-gray-800 p-8 rounded-lg shadow-xl border border-gray-700" method="POST" action="/register">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+                <div class="space-y-4">
+                    {# Username #}
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-gray-300 mb-2">
+                            Username
+                        </label>
+                        <input
+                            id="username"
+                            name="username"
+                            type="text"
+                            autocomplete="username"
+                            required
+                            value="{{ old.username|default('') }}"
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-600 bg-gray-700 placeholder-gray-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all"
+                            placeholder="Choose a username"
+                            minlength="3"
+                            maxlength="50"
+                            pattern="[a-zA-Z0-9_]+"
+                        >
+                        {% if errors.username %}
+                            <p class="mt-2 text-sm text-red-400">{{ errors.username }}</p>
+                        {% else %}
+                            <p class="mt-2 text-xs text-gray-400">3-50 characters, alphanumeric and underscores only</p>
+                        {% endif %}
+                    </div>
+
+                    {# Email #}
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-300 mb-2">
+                            Email Address
+                        </label>
+                        <input
+                            id="email"
+                            name="email"
+                            type="email"
+                            autocomplete="email"
+                            required
+                            value="{{ old.email|default('') }}"
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-600 bg-gray-700 placeholder-gray-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all"
+                            placeholder="your@email.com"
+                        >
+                        {% if errors.email %}
+                            <p class="mt-2 text-sm text-red-400">{{ errors.email }}</p>
+                        {% endif %}
+                    </div>
+
+                    {# Password #}
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-300 mb-2">
+                            Password
+                        </label>
+                        <input
+                            id="password"
+                            name="password"
+                            type="password"
+                            autocomplete="new-password"
+                            required
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-600 bg-gray-700 placeholder-gray-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all"
+                            placeholder="••••••••"
+                            minlength="8"
+                        >
+                        {% if errors.password %}
+                            <p class="mt-2 text-sm text-red-400">{{ errors.password }}</p>
+                        {% else %}
+                            <p class="mt-2 text-xs text-gray-400">At least 8 characters with uppercase, lowercase, and number</p>
+                        {% endif %}
+                    </div>
+
+                    {# Confirm Password #}
+                    <div>
+                        <label for="password_confirm" class="block text-sm font-medium text-gray-300 mb-2">
+                            Confirm Password
+                        </label>
+                        <input
+                            id="password_confirm"
+                            name="password_confirm"
+                            type="password"
+                            autocomplete="new-password"
+                            required
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-600 bg-gray-700 placeholder-gray-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent transition-all"
+                            placeholder="••••••••"
+                            minlength="8"
+                        >
+                        {% if errors.password_confirm %}
+                            <p class="mt-2 text-sm text-red-400">{{ errors.password_confirm }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {# Terms #}
+                <div class="flex items-start">
+                    <div class="flex items-center h-5">
+                        <input
+                            id="terms"
+                            name="terms"
+                            type="checkbox"
+                            required
+                            class="h-4 w-4 text-yellow-600 focus:ring-yellow-500 border-gray-600 rounded bg-gray-700"
+                        >
+                    </div>
+                    <div class="ml-3 text-sm">
+                        <label for="terms" class="text-gray-300">
+                            I agree to the
+                            <a href="#" class="text-yellow-500 hover:text-yellow-400">Terms of Service</a>
+                            and
+                            <a href="#" class="text-yellow-500 hover:text-yellow-400">Privacy Policy</a>
+                        </label>
+                    </div>
+                </div>
+
+                {# Submit button #}
+                <div>
+                    <button
+                        type="submit"
+                        class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-all transform hover:scale-105"
+                    >
+                        <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                            <svg class="h-5 w-5 text-yellow-500 group-hover:text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z" />
+                            </svg>
+                        </span>
+                        Create Account
+                    </button>
+                </div>
+
+                {# Login link #}
+                <div class="text-center">
+                    <p class="text-sm text-gray-400">
+                        Already have an account?
+                        <a href="/login" class="font-medium text-yellow-500 hover:text-yellow-400">
+                            Sign in instead
+                        </a>
+                    </p>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}

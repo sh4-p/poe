@@ -1,0 +1,138 @@
+{% extends "layouts/base.twig" %}
+
+{% block content %}
+    <div class="bg-gray-900 min-h-screen py-8">
+        <div class="container mx-auto px-4 max-w-2xl">
+            <div class="mb-8">
+                <h1 class="text-4xl font-bold text-yellow-500 mb-2">Import Build</h1>
+                <p class="text-gray-400">Import your build from Path of Building or Pastebin</p>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg border border-gray-700 p-8">
+                <form id="import-form" class="space-y-6">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+                    {# Pastebin URL #}
+                    <div>
+                        <label for="pastebin_url" class="block text-sm font-medium text-gray-300 mb-2">
+                            Pastebin URL
+                        </label>
+                        <input
+                            type="url"
+                            id="pastebin_url"
+                            name="pastebin_url"
+                            placeholder="https://pastebin.com/..."
+                            class="w-full px-4 py-3 border border-gray-600 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                        >
+                        <p class="mt-2 text-xs text-gray-400">Paste the Pastebin URL containing your POB code</p>
+                    </div>
+
+                    <div class="flex items-center">
+                        <div class="flex-1 border-t border-gray-700"></div>
+                        <span class="px-4 text-sm text-gray-500">OR</span>
+                        <div class="flex-1 border-t border-gray-700"></div>
+                    </div>
+
+                    {# POB Code #}
+                    <div>
+                        <label for="pob_code" class="block text-sm font-medium text-gray-300 mb-2">
+                            Path of Building Code
+                        </label>
+                        <textarea
+                            id="pob_code"
+                            name="pob_code"
+                            rows="10"
+                            placeholder="Paste your POB code here..."
+                            class="w-full px-4 py-3 border border-gray-600 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 font-mono text-sm"
+                        ></textarea>
+                        <p class="mt-2 text-xs text-gray-400">Paste the exported code from Path of Building</p>
+                    </div>
+
+                    {# Buttons #}
+                    <div class="flex gap-4">
+                        <button
+                            type="submit"
+                            class="flex-1 px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-white font-medium rounded-lg transition-all"
+                        >
+                            Import Build
+                        </button>
+                        <a
+                            href="/my-builds"
+                            class="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-lg transition-all text-center"
+                        >
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+
+            {# Instructions #}
+            <div class="mt-8 bg-gray-800 rounded-lg border border-gray-700 p-6">
+                <h3 class="text-lg font-bold text-white mb-4">How to Import</h3>
+                <div class="space-y-4 text-sm text-gray-300">
+                    <div class="flex items-start">
+                        <span class="flex-shrink-0 w-6 h-6 bg-yellow-600 text-white rounded-full flex items-center justify-center mr-3 mt-0.5">1</span>
+                        <div>
+                            <strong>From Path of Building:</strong>
+                            <p class="text-gray-400 mt-1">Click "Import/Export Build" → "Generate" → "Share with Pastebin" → Copy the URL or code</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="flex-shrink-0 w-6 h-6 bg-yellow-600 text-white rounded-full flex items-center justify-center mr-3 mt-0.5">2</span>
+                        <div>
+                            <strong>From Pastebin:</strong>
+                            <p class="text-gray-400 mt-1">Paste the Pastebin URL in the field above</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="flex-shrink-0 w-6 h-6 bg-yellow-600 text-white rounded-full flex items-center justify-center mr-3 mt-0.5">3</span>
+                        <div>
+                            <strong>Direct Code:</strong>
+                            <p class="text-gray-400 mt-1">Or paste the POB code directly into the text area</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('import-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const formData = new FormData(e.target);
+
+    try {
+        const response = await fetch('/build/import', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            window.location.href = `/build/${result.data.build_id}/edit`;
+        } else {
+            alert('Import failed: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Network error');
+    }
+});
+
+// Clear one field when the other is filled
+document.getElementById('pastebin_url').addEventListener('input', function() {
+    if (this.value) {
+        document.getElementById('pob_code').value = '';
+    }
+});
+
+document.getElementById('pob_code').addEventListener('input', function() {
+    if (this.value) {
+        document.getElementById('pastebin_url').value = '';
+    }
+});
+</script>
+{% endblock %}
