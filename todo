@@ -1,0 +1,272 @@
+Project: "Exile Architect" - Advanced PoE Build Planner 
+Phase 1: Foundation & Project Setup (Week 1) 
+
+     
+
+    1.1. Environment & Version Control: 
+         Initialize a Git repository (e.g., on GitHub).
+         Set up a local development environment (e.g., Docker with LEMP stack, XAMPP, MAMP).
+         Define a clear branching strategy (e.g., main, develop, feature branches).
+         
+     
+
+    1.2. Project Architecture (MVC): 
+         Define the root directory structure.
+         
+         
+
+         
+        1
+        2
+        3
+        4
+        5
+        6
+        7
+        8
+        9
+        10
+        11
+        12
+        13
+        14
+        15
+        /public
+          index.php       (Front Controller)
+          /assets
+            /css
+            /js
+            /images
+        /app
+          /Controllers
+          /Models
+          /Views
+          /Core           (Router, Database Connection, Request Handler)
+          /Services       (API Integrations, Scraper, AI Logic)
+        /config
+        /data             (For scraped JSON files like passive tree)
+        /vendor           (For Composer dependencies)
+         
+         
+         
+         Set up Composer  for dependency management.
+         Install core dependencies:
+             twig/twig for a modern templating engine in Views.
+             guzzlehttp/guzzle for making HTTP requests to APIs and for web scraping.
+             
+         
+     
+
+    1.3. Database Design & Setup: 
+         Design the database schema. Use a tool like dbdiagram.io to visualize it.
+         Key Tables:
+             users (id, username, email, password_hash, created_at)
+             builds (id, user_id, build_name, ascendancy_class, poe_version, is_public, created_at, updated_at)
+             build_data (id, build_id, data_type, json_data) -> data_type can be 'passive_tree', 'items', 'skills', 'gems', 'jewels', 'flasks'. Storing large JSON objects here is flexible.
+             uniques (id, name, base_item, inventory_icon, stats_json, poe_version) -> To be populated by scraper.
+             base_items (id, name, item_class, item_level, stats_json) -> To be populated by scraper.
+             skill_gems (id, name, gem_tag, description, stats_json, poe_version) -> To be populated by scraper.
+             
+         Set up the local database (MySQL/MariaDB).
+         Create migration files for creating and updating the database schema.
+         
+     
+
+Phase 2: Backend Development (MVC in PHP) (Weeks 2-4) 
+
+     
+
+    2.1. Core MVC Components: 
+         Front Controller (public/index.php): Create the single entry point for all requests.
+         Router (app/Core/Router.php): Build a simple router to parse the URL and direct requests to the appropriate controller and method (e.g., /build/new -> BuildController::newAction()).
+         Database Connection (app/Core/Database.php): Create a singleton class using PDO to manage the database connection securely.
+         
+     
+
+    2.2. Models (app/Models/): 
+         User.php: Handle user registration, login, session management, and profile data (CRUD).
+         Build.php: Handle creating, reading, updating, and deleting builds. Manage the relationship between a user and their builds.
+         GameData.php: A model to interact with the scraped game data tables (uniques, base_items, skill_gems).
+         
+     
+
+    2.3. Controllers (app/Controllers/): 
+         BaseController.php: An abstract base controller for common functionalities (e.g., rendering views).
+         HomeController.php: For the landing page.
+         UserController.php: Methods for register, login, logout, dashboard.
+         BuildController.php: The most important controller.
+             newAction(): Display the build creation page.
+             editAction($buildId): Display the page for editing an existing build.
+             saveAction(): Handle AJAX POST requests to save the build's JSON data (tree, items, etc.) to the database.
+             viewAction($buildId): Display a public or private build view.
+             importAction(): Handle importing builds from Pastebin or in-game code.
+             
+         ApiController.php: A dedicated controller for AJAX requests from the frontend.
+             getItemsAction(): Endpoint to search for items (e.g., by name, filter by slot).
+             getPassiveTreeAction(): Endpoint to serve the latest passive tree JSON data.
+             generateBuildWithAIAction(): Endpoint that communicates with the Gemini AI service.
+             
+         
+     
+
+    2.4. Services (app/Services/): 
+         GeminiAIService.php: A wrapper class to handle communication with the Google Gemini API. This will include prompt engineering and response parsing.
+         DataScraperService.php: A service to scrape data from the specified sources. This will be run by a cron job.
+         
+     
+
+Phase 3: Frontend Development (HTML, CSS, JS) (Weeks 3-6) 
+
+     
+
+    3.1. HTML & CSS Structure (Mobile-First): 
+         Layout: Use semantic HTML5 (<header>, <main>, <nav>, <section>, <footer>).
+         CSS Framework: Choose a modern utility-first framework like Tailwind CSS for rapid, responsive styling, or a component-based one like Bootstrap 5.
+         Responsive Design: Implement a mobile-first approach using CSS media queries (min-width). Ensure the layout is perfect on phones, tablets, and desktops.
+         Styling:
+             Create a dark/light theme toggle using CSS variables.
+             Design a clean, modern UI that feels like a gaming tool. Use PoE's color palette and iconography as inspiration.
+             Style key components: item popups (tooltips), skill gem selectors, the passive tree viewer.
+             
+         
+     
+
+    3.2. Vanilla JavaScript (ES6+ Modules): 
+         Modular Structure: Organize JS into modules (import/export).
+             /js/modules/PassiveTreeViewer.js
+             /js/modules/ItemSelector.js
+             /js/modules/SkillPlanner.js
+             /js/modules/BuildManager.js
+             /js/main.js (entry point)
+             
+         Passive Tree Viewer: This is the most complex frontend component.
+             Use a library like D3.js or P5.js to render the passive tree from the JSON data.
+             Implement features: pan, zoom, searching for nodes, highlighting connections, allocating/de-allocating points.
+             Show jewel sockets and allow for jewel assignment.
+             
+         Item & Skill Selector:
+             Create dynamic search boxes that query the backend API (ApiController) via AJAX (fetch API).
+             Display results in a clean, filterable list.
+             When an item is selected, display its stats in a detailed popup, similar to in-game.
+             
+         AJAX Communication:
+             Use the fetch API for all asynchronous communication with the backend.
+             Implement auto-saving functionality. When a user makes a change (e.g., adds an item), send an AJAX request to the BuildController::saveAction() endpoint in the background.
+             Provide user feedback for all actions (loading spinners, success/error messages).
+             
+         
+     
+
+Phase 4: Data Integration & Automation (Weeks 2 & 5) 
+
+     
+
+    4.1. Scraper/API Service (app/Services/DataScraperService.php): 
+         Passive Tree: Create a script to download the latest tree.json file from GGG's official source (usually found in their patch notes or game data repository). Store this in /data/.
+         Items & Uniques:
+             Use Guzzle to scrape poedb.tw/us/ for detailed item stats, base types, and mod pools.
+             Scrape poewiki.net for unique item names, lore, and detailed descriptions.
+             Parse the scraped HTML/JSON and populate the uniques and base_items tables in the database.
+             
+         Skill Gems: Scrape poewiki.net for all skill gems, their tags, levels, and stat progressions. Populate the skill_gems table.
+         Meta Data: Use the official poe.ninja API to fetch data on popular items, skills, and ascendancy classes. This can be used to inform AI suggestions or display "trending" builds.
+         
+     
+
+    4.2. Automation: 
+         Set up a cron job on the server to run the DataScraperService periodically (e.g., once a day, or triggered manually on patch day) to keep the local database up-to-date.
+         
+     
+
+Phase 5: AI Integration with Gemini (Week 6) 
+
+     
+
+    5.1. Prompt Engineering (app/Services/GeminiAIService.php): 
+         Design a detailed and structured prompt for Gemini. The prompt is the most critical part.
+         Prompt Structure:
+             Role: "You are an expert Path of Exile build creator..."
+             Context: Provide current game version, league, and key mechanics from the scraped data.
+             User Request: "Create a [league-start/endgame/speed-farming] build for the [Ascendancy Class] that uses [Skill Gem]. The budget is [low/medium/high]."
+             Constraints: Provide a list of all relevant unique items, key passives, and support gems from the local database for the AI to choose from. This grounds the AI in reality.
+             Output Format: Demand a strict JSON output format that your application can parse directly.
+            json
+             
+             
+
+             
+            1
+            2
+            3
+            4
+            5
+            6
+            7
+            8
+            9
+            10
+            11
+            12
+            13
+            ⌄
+            ⌄
+            ⌄
+            {
+              "build_name": "Fiery Righteous Juggernaut",
+              "passive_tree_url": "https://pathofexile.com/passive-tree-version/AAA...",
+              "items": [
+                { "slot": "Helmet", "name": "Geofri's Crest", "rarity": "Unique" },
+                { "slot": "Body Armour", "name": "Kaom's Heart", "rarity": "Unique" }
+              ],
+              "skill_gems": [
+                { "link_group": "6-Link Body Armour", "gems": ["Righteous Fire", "Burning Damage", "Efficacy", "Concentrated Effect", "Elemental Focus", "Increased Area of Effect"] }
+              ],
+              "flasks": [...],
+              "jewels": [...]
+            }
+             
+             
+             
+             
+         
+     
+
+    5.2. Backend Logic: 
+         In the ApiController::generateBuildWithAIAction(), receive the user's text prompt.
+         Call the GeminiAIService, passing the user's prompt and the relevant game data context.
+         Receive the JSON response from Gemini.
+         Validation: Crucially, validate the AI's response. Does it suggest valid items? Are the gem links logical? Sanitize the data.
+         Save the generated build data to the database, associated with the user's account.
+         Return the new build's ID to the frontend.
+         
+     
+
+    5.3. Frontend Integration: 
+         Create a user-friendly interface for the AI generator.
+         A text area for the user's request.
+         Dropdowns/checkboxes for common constraints (e.g., Ascendancy, Main Skill, Budget).
+         A "Generate Build" button that triggers the AJAX call.
+         Once the build ID is returned, redirect the user to the newly created build's edit page, where they can see the AI's suggestions and fine-tune them.
+         
+     
+
+Phase 6: Testing & Deployment (Week 7) 
+
+     
+
+    6.1. Testing: 
+         Backend: Write unit tests for models and core logic using PHPUnit.
+         Integration Testing: Manually test all user flows: registration, creating a build, saving, importing, and AI generation.
+         Cross-Browser & Device Testing: Ensure the site works perfectly on Chrome, Firefox, Safari, and on various mobile devices.
+         
+     
+
+    6.2. Deployment: 
+         Set up a production server (e.g., a VPS from DigitalOcean/Linode).
+         Configure a LEMP (Linux, Nginx, MySQL, PHP) stack.
+         Set up a domain and SSL certificate (Let's Encrypt).
+         Deploy the application using Git.
+         Configure the production cron job for the data scraper.
+         Set up error logging and monitoring.
+         
+     
