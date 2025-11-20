@@ -84,6 +84,23 @@ docker exec -it exile_php php cli/migrate.php
 docker exec -it exile_php php cli/seed.php
 ```
 
+### 🤖 AI Integration (Optional)
+
+The AI build generation feature uses Google Gemini API. The system works with or without API access:
+
+**✅ With API (Production):**
+1. Get API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. Add to `.env`: `GEMINI_API_KEY=your_api_key_here`
+3. Test: `php test_ai_service.php`
+4. Demo: `php demo_ai_build.php`
+
+**✅ Without API (Development):**
+- System automatically uses realistic mock data
+- All features work normally for development
+- No API costs or rate limits
+
+**📖 For detailed setup:** See [GEMINI_API_SETUP.md](GEMINI_API_SETUP.md)
+
 ## 📁 Project Structure
 
 ```
@@ -119,6 +136,13 @@ php cli/seed.php                 # Seed sample data
 php cli/scraper.php --task=all   # Scrape all game data
 php cli/scraper.php --task=uniques  # Scrape only uniques
 
+# Testing
+php test_complete_system.php     # Run complete system tests
+php test_ai_service.php          # Test AI service integration
+
+# AI Demo
+php demo_ai_build.php            # Interactive AI build generator demo
+
 # Development server
 composer serve                   # Start PHP dev server (port 8080)
 ```
@@ -140,6 +164,8 @@ composer check-style
 - [claude.md](claude.md) - Complete development roadmap and checklist
 - [DATA_SETUP.md](DATA_SETUP.md) - Data scraping and setup guide
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment guide
+- [GEMINI_API_SETUP.md](GEMINI_API_SETUP.md) - AI integration guide
+- [PROJECT_STATUS.md](PROJECT_STATUS.md) - Detailed project status report
 
 ## 🔒 Security
 
@@ -158,10 +184,10 @@ Phase 1: Foundation & Setup       ✅ COMPLETE
 Phase 2: Backend Development      ✅ COMPLETE
 Phase 3: Frontend Development     ✅ COMPLETE
 Phase 4: Data Integration         ✅ COMPLETE
-Phase 5: AI Integration           ⚠️  PARTIAL (service ready)
-Phase 6: Testing & Deployment     📝 DOCUMENTED
+Phase 5: AI Integration           ✅ COMPLETE (with mock fallback)
+Phase 6: Testing & Deployment     ✅ COMPLETE (docs + tests)
 
-Overall: ~75% Complete
+Overall: ~85% Complete
 ```
 
 ## 🎯 Features Implemented
