@@ -14,16 +14,20 @@ export class PassiveTreeViewer {
             enableZoom: true,
             enablePan: true,
             minZoom: 0.1,
-            maxZoom: 3,
+            maxZoom: 5, // Increased max zoom for detail
             nodeRadius: 8,
             startingNodeRadius: 12,
             notableRadius: 10,
             keystoneRadius: 14,
             useSprites: true, // Enable GGG official sprites
-            spriteZoomLevel: 1, // Zoom level index (0-3)
+            spriteZoomLevel: 2, // Higher quality (0=low, 1=med, 2=high, 3=max)
             assetBaseUrl: 'https://raw.githubusercontent.com/grindinggear/skilltree-export/3.27.0/assets/',
+            enableLOD: true, // Level of detail based on zoom
             ...options
         };
+
+        // Current zoom state for LOD
+        this.currentZoomScale = 1;
 
         this.treeData = null;
         this.rawTreeData = null; // Store raw tree data for groups, etc.
@@ -152,12 +156,21 @@ export class PassiveTreeViewer {
         this.nodeLayer = this.g.append('g')
             .attr('class', 'node-layer');
 
-        // Add zoom behavior
+        // Add zoom behavior with LOD support
         if (this.options.enableZoom) {
             this.zoom = d3.zoom()
                 .scaleExtent([this.options.minZoom, this.options.maxZoom])
                 .on('zoom', (event) => {
                     this.g.attr('transform', event.transform);
+
+                    // Track zoom for LOD
+                    if (this.options.enableLOD) {
+                        const newScale = event.transform.k;
+                        if (Math.abs(newScale - this.currentZoomScale) > 0.5) {
+                            this.currentZoomScale = newScale;
+                            this.updateLOD(newScale);
+                        }
+                    }
                 });
 
             this.svg.call(this.zoom);
@@ -633,12 +646,22 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Render connections between nodes using GGG line sprites
+     * Render connections between nodes with POE-style lines
      */
-    renderConnections() {
+    async renderConnections() {
         if (!this.treeData.links) return;
 
         const nodeMap = new Map(this.treeData.nodes.map(n => [n.id, n]));
+        const lineUrl = `${this.options.assetBaseUrl}line-${this.options.spriteZoomLevel}.png`;
+
+        // Try to preload line sprite
+        let useLineSprite = false;
+        try {
+            await this.loadSpriteImage(lineUrl);
+            useLineSprite = true;
+        } catch (e) {
+            console.warn('Line sprite not available, using SVG lines');
+        }
 
         this.treeData.links.forEach(link => {
             const source = nodeMap.get(link.source);
@@ -647,17 +670,54 @@ export class PassiveTreeViewer {
             if (!source || !target) return;
 
             const isAllocated = this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id);
+            const isPartialPath = this.allocatedNodes.has(source.id) || this.allocatedNodes.has(target.id);
 
-            // Draw line
-            this.connectionLayer.append('line')
-                .attr('x1', source.x)
-                .attr('y1', source.y)
-                .attr('x2', target.x)
-                .attr('y2', target.y)
-                .attr('stroke', isAllocated ? '#b89968' : '#4a4a4a') // Gold or dark gray
-                .attr('stroke-width', isAllocated ? 4 : 2)
-                .attr('stroke-linecap', 'round')
-                .style('opacity', isAllocated ? 0.9 : 0.4);
+            // Calculate line properties
+            const dx = target.x - source.x;
+            const dy = target.y - source.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+            if (useLineSprite && isAllocated) {
+                // Use GGG line sprite for allocated paths
+                this.connectionLayer.append('image')
+                    .attr('xlink:href', lineUrl)
+                    .attr('x', source.x)
+                    .attr('y', source.y - 2)
+                    .attr('width', length)
+                    .attr('height', 4)
+                    .attr('preserveAspectRatio', 'none')
+                    .style('transform', `rotate(${angle}deg)`)
+                    .style('transform-origin', '0 2px')
+                    .style('opacity', 0.9);
+            } else {
+                // Fallback to SVG line
+                let strokeColor, strokeWidth, opacity;
+
+                if (isAllocated) {
+                    strokeColor = '#b89968'; // Gold
+                    strokeWidth = 4;
+                    opacity = 0.9;
+                } else if (isPartialPath) {
+                    strokeColor = '#7a6f5c'; // Dim gold
+                    strokeWidth = 3;
+                    opacity = 0.6;
+                } else {
+                    strokeColor = '#4a4a4a'; // Dark gray
+                    strokeWidth = 2;
+                    opacity = 0.3;
+                }
+
+                this.connectionLayer.append('line')
+                    .attr('x1', source.x)
+                    .attr('y1', source.y)
+                    .attr('x2', target.x)
+                    .attr('y2', target.y)
+                    .attr('stroke', strokeColor)
+                    .attr('stroke-width', strokeWidth)
+                    .attr('stroke-linecap', 'round')
+                    .style('opacity', opacity);
+            }
         });
 
         console.log(`✓ Rendered ${this.treeData.links.length} connections`);
@@ -703,6 +763,7 @@ export class PassiveTreeViewer {
 
     /**
      * Render individual node with sprite from GGG sprite sheet
+     * Uses Canvas for accurate sprite extraction
      */
     async renderNode(node) {
         const isAllocated = this.allocatedNodes.has(node.id);
@@ -718,37 +779,52 @@ export class PassiveTreeViewer {
             .on('mouseleave', () => this.handleNodeLeave());
 
         if (spriteData && this.options.useSprites) {
-            // Use GGG sprite
+            // Use GGG sprite with Canvas extraction
             try {
-                await this.loadSpriteImage(spriteData.url);
+                const spriteImage = await this.loadSpriteImage(spriteData.url);
+                const croppedDataUrl = await this.cropSpriteFromSheet(
+                    spriteImage,
+                    spriteData.coords
+                );
 
-                const coords = spriteData.coords;
-                const scale = this.getSpriteScale(node);
+                if (croppedDataUrl) {
+                    const scale = this.getSpriteScale(node);
+                    const w = spriteData.coords.w * scale;
+                    const h = spriteData.coords.h * scale;
 
-                // Create clip path for this sprite
-                const clipId = `clip-${node.id}`;
-                const defs = this.svg.select('defs');
+                    // Add cropped sprite
+                    g.append('image')
+                        .attr('xlink:href', croppedDataUrl)
+                        .attr('x', node.x - w / 2)
+                        .attr('y', node.y - h / 2)
+                        .attr('width', w)
+                        .attr('height', h)
+                        .style('opacity', isAllocated ? 1 : 0.7);
 
-                defs.append('clipPath')
-                    .attr('id', clipId)
-                    .append('rect')
-                    .attr('x', 0)
-                    .attr('y', 0)
-                    .attr('width', coords.w)
-                    .attr('height', coords.h);
+                    // Add frame overlay if available
+                    const frameUrl = `${this.options.assetBaseUrl}frame-${this.options.spriteZoomLevel}.png`;
+                    try {
+                        await this.loadSpriteImage(frameUrl);
+                        const frameScale = scale * 1.1; // Frame slightly larger
+                        const frameSize = Math.max(w, h) * 1.2;
 
-                // Add sprite from sheet
-                g.append('image')
-                    .attr('xlink:href', spriteData.url)
-                    .attr('x', node.x - (coords.w * scale) / 2)
-                    .attr('y', node.y - (coords.h * scale) / 2)
-                    .attr('width', spriteData.sheetWidth * scale)
-                    .attr('height', spriteData.sheetHeight * scale)
-                    .attr('clip-path', `url(#${clipId})`)
-                    .style('transform', `translate(${-coords.x * scale}px, ${-coords.y * scale}px)`)
-                    .style('opacity', isAllocated ? 1 : 0.6);
+                        g.append('image')
+                            .attr('xlink:href', frameUrl)
+                            .attr('x', node.x - frameSize / 2)
+                            .attr('y', node.y - frameSize / 2)
+                            .attr('width', frameSize)
+                            .attr('height', frameSize)
+                            .style('opacity', isAllocated ? 0.8 : 0.5)
+                            .style('pointer-events', 'none');
+                    } catch (e) {
+                        // Frame optional
+                    }
+                } else {
+                    throw new Error('Failed to crop sprite');
+                }
 
             } catch (error) {
+                console.warn(`Sprite rendering failed for ${node.id}:`, error.message);
                 // Fallback to colored circle
                 this.renderNodeFallback(g, node, isAllocated);
             }
@@ -767,13 +843,41 @@ export class PassiveTreeViewer {
             const radius = this.getNodeRadius(node);
             this.nodeLayer.append('text')
                 .attr('x', node.x)
-                .attr('y', node.y + radius + 16)
+                .attr('y', node.y + radius + 20)
                 .attr('text-anchor', 'middle')
                 .attr('fill', isAllocated ? '#d4af37' : '#999')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', isAllocated ? 'bold' : 'normal')
                 .style('pointer-events', 'none')
+                .style('text-shadow', '0 0 4px rgba(0,0,0,0.8)')
                 .text(node.name || '');
+        }
+    }
+
+    /**
+     * Crop sprite from sprite sheet using Canvas
+     * This ensures accurate extraction
+     */
+    async cropSpriteFromSheet(spriteImage, coords) {
+        try {
+            // Create off-screen canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = coords.w;
+            canvas.height = coords.h;
+            const ctx = canvas.getContext('2d');
+
+            // Draw cropped region
+            ctx.drawImage(
+                spriteImage,
+                coords.x, coords.y, coords.w, coords.h,  // Source
+                0, 0, coords.w, coords.h                   // Destination
+            );
+
+            // Convert to data URL
+            return canvas.toDataURL('image/png');
+        } catch (error) {
+            console.error('Canvas crop failed:', error);
+            return null;
         }
     }
 
@@ -819,15 +923,20 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Get sprite scale based on node type
+     * Get sprite scale based on node type (bigger for more detail)
      */
     getSpriteScale(node) {
+        // Base scale multiplier for better visibility
+        const baseMultiplier = 2.5;
+
         switch (node.type) {
-            case 'keystone': return 1.2;
-            case 'notable': return 1.0;
-            case 'mastery': return 1.1;
-            case 'jewel': return 1.0;
-            default: return 0.8;
+            case 'root': return 3.5 * baseMultiplier;
+            case 'classStart': return 3.0 * baseMultiplier;
+            case 'keystone': return 2.8 * baseMultiplier;
+            case 'notable': return 2.2 * baseMultiplier;
+            case 'mastery': return 2.5 * baseMultiplier;
+            case 'jewel': return 2.0 * baseMultiplier;
+            default: return 1.5 * baseMultiplier;
         }
     }
 
@@ -985,6 +1094,31 @@ export class PassiveTreeViewer {
         this.spriteSheets.set(url, promise);
 
         return promise;
+    }
+
+    /**
+     * Update level of detail based on zoom
+     */
+    updateLOD(zoomScale) {
+        // Adjust node visibility based on zoom
+        if (zoomScale < 0.3) {
+            // Very zoomed out - only show major nodes
+            this.nodeLayer.selectAll('.tree-node').style('display', (d) => {
+                const node = d.__data__ || d;
+                return (node.type === 'keystone' || node.type === 'root') ? 'block' : 'none';
+            });
+        } else if (zoomScale < 0.6) {
+            // Medium zoom - show keystones and notables
+            this.nodeLayer.selectAll('.tree-node').style('display', (d) => {
+                const node = d.__data__ || d;
+                return (node.type === 'keystone' || node.type === 'notable' || node.type === 'root') ? 'block' : 'none';
+            });
+        } else {
+            // Zoomed in - show all important nodes
+            this.nodeLayer.selectAll('.tree-node').style('display', 'block');
+        }
+
+        console.log(`LOD updated for zoom: ${zoomScale.toFixed(2)}`);
     }
 
     /**
