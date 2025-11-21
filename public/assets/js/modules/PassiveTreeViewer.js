@@ -118,6 +118,12 @@ export class PassiveTreeViewer {
         this.adjacencyList = new Map(); // Node connections for pathfinding
         this.pathToHoveredNode = null; // Store path to show in mid layer
 
+        // Touch/mobile support
+        this.lastTouchDistance = 0;
+        this.touchStartX = 0;
+        this.touchStartY = 0;
+        this.isTouching = false;
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -330,6 +336,12 @@ export class PassiveTreeViewer {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+        // Touch event handlers for mobile support
+        this.topCanvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+        this.topCanvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+        this.topCanvas.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+        this.topCanvas.addEventListener('touchcancel', (e) => this.handleTouchEnd(e), { passive: false });
     }
 
     /**
@@ -389,6 +401,113 @@ export class PassiveTreeViewer {
                 e.preventDefault();
                 break;
         }
+    }
+
+    /**
+     * Handle touch start (mobile support)
+     */
+    handleTouchStart(e) {
+        e.preventDefault(); // Prevent browser zoom/scroll
+
+        const touches = e.touches;
+
+        if (touches.length === 1) {
+            // Single touch - start panning
+            this.isTouching = true;
+            const rect = this.topCanvas.getBoundingClientRect();
+            this.touchStartX = touches[0].clientX - rect.left - this.viewport.x;
+            this.touchStartY = touches[0].clientY - rect.top - this.viewport.y;
+        } else if (touches.length === 2) {
+            // Two fingers - start pinch zoom
+            const dx = touches[1].clientX - touches[0].clientX;
+            const dy = touches[1].clientY - touches[0].clientY;
+            this.lastTouchDistance = Math.sqrt(dx * dx + dy * dy);
+        }
+    }
+
+    /**
+     * Handle touch move (mobile support)
+     */
+    handleTouchMove(e) {
+        e.preventDefault(); // Prevent browser zoom/scroll
+
+        const touches = e.touches;
+
+        if (touches.length === 1 && this.isTouching) {
+            // Single touch - pan
+            const rect = this.topCanvas.getBoundingClientRect();
+            const touchX = touches[0].clientX - rect.left;
+            const touchY = touches[0].clientY - rect.top;
+
+            this.viewport.x = touchX - this.touchStartX;
+            this.viewport.y = touchY - this.touchStartY;
+
+            this.markAllTilesDirty();
+            this.render();
+        } else if (touches.length === 2) {
+            // Two fingers - pinch zoom
+            const dx = touches[1].clientX - touches[0].clientX;
+            const dy = touches[1].clientY - touches[0].clientY;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+            if (this.lastTouchDistance > 0) {
+                const delta = currentDistance - this.lastTouchDistance;
+
+                // Zoom threshold (pixels of pinch movement needed)
+                const zoomThreshold = 30;
+
+                if (delta > zoomThreshold) {
+                    this.zoomIn();
+                    this.lastTouchDistance = currentDistance;
+                } else if (delta < -zoomThreshold) {
+                    this.zoomOut();
+                    this.lastTouchDistance = currentDistance;
+                }
+            } else {
+                this.lastTouchDistance = currentDistance;
+            }
+        }
+    }
+
+    /**
+     * Handle touch end (mobile support)
+     */
+    handleTouchEnd(e) {
+        e.preventDefault();
+
+        const touches = e.touches;
+
+        // If a single tap (no movement), treat as click
+        if (touches.length === 0 && this.isTouching) {
+            // Get the last touch position from changedTouches
+            const lastTouch = e.changedTouches[0];
+            const rect = this.topCanvas.getBoundingClientRect();
+            const canvasX = lastTouch.clientX - rect.left;
+            const canvasY = lastTouch.clientY - rect.top;
+
+            // Check if this was a tap (minimal movement)
+            const startCanvasX = this.touchStartX + this.viewport.x;
+            const startCanvasY = this.touchStartY + this.viewport.y;
+            const moveDistance = Math.sqrt(
+                Math.pow(canvasX - startCanvasX, 2) +
+                Math.pow(canvasY - startCanvasY, 2)
+            );
+
+            // If movement was small (< 10px), treat as tap/click
+            if (moveDistance < 10) {
+                const worldX = (canvasX - this.viewport.x) / this.viewport.scale;
+                const worldY = (canvasY - this.viewport.y) / this.viewport.scale;
+
+                const tappedNode = this.findNodeAt(worldX, worldY);
+                if (tappedNode) {
+                    this.toggleNode(tappedNode);
+                }
+            }
+        }
+
+        // Reset touch state
+        this.isTouching = false;
+        this.lastTouchDistance = 0;
     }
 
     /**
