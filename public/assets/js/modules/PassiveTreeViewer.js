@@ -1,6 +1,6 @@
 /**
  * Passive Tree Viewer Module
- * Interactive passive skill tree visualization with D3.js
+ * POE/PoB style visualization with official GGG assets
  */
 
 import { showToast } from './utils.js';
@@ -13,18 +13,20 @@ export class PassiveTreeViewer {
             height: 800,
             enableZoom: true,
             enablePan: true,
-            minZoom: 0.5,
+            minZoom: 0.1,
             maxZoom: 3,
             nodeRadius: 8,
             startingNodeRadius: 12,
             notableRadius: 10,
             keystoneRadius: 14,
-            useSprites: true, // Enable sprite rendering from GGG CDN
-            spriteZoomLevel: 0.2109, // Default zoom level (index 1)
+            useSprites: true, // Enable GGG official sprites
+            spriteZoomLevel: 1, // Zoom level index (0-3)
+            assetBaseUrl: 'https://raw.githubusercontent.com/grindinggear/skilltree-export/3.27.0/assets/',
             ...options
         };
 
         this.treeData = null;
+        this.rawTreeData = null; // Store raw tree data for groups, etc.
         this.allocatedNodes = new Set();
         this.selectedNode = null;
         this.hoveredNode = null;
@@ -36,6 +38,12 @@ export class PassiveTreeViewer {
         this.g = null;
         this.zoom = null;
         this.simulation = null;
+
+        // Asset layers
+        this.backgroundLayer = null;
+        this.groupBackgroundLayer = null;
+        this.connectionLayer = null;
+        this.nodeLayer = null;
 
         // Sprite data from GGG
         this.sprites = null;
@@ -99,48 +107,29 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Setup SVG canvas
+     * Setup SVG canvas with POE-style layers
      */
     setupSVG() {
         // Clear container
         this.container.innerHTML = '';
 
-        // Create SVG with PoB-style background
+        // Create SVG with dark background
         this.svg = d3.select(this.container)
             .append('svg')
             .attr('width', '100%')
             .attr('height', '100%')
             .attr('viewBox', `0 0 ${this.options.width} ${this.options.height}`)
-            .style('background', 'radial-gradient(circle at center, #1a202c 0%, #0d1117 100%)')
+            .style('background', '#000000')
             .style('border-radius', '8px');
 
-        // Add definitions for gradients and patterns
+        // Add definitions for filters
         const defs = this.svg.append('defs');
-
-        // Subtle grid pattern (PoB style)
-        const pattern = defs.append('pattern')
-            .attr('id', 'grid-pattern')
-            .attr('width', 50)
-            .attr('height', 50)
-            .attr('patternUnits', 'userSpaceOnUse');
-
-        pattern.append('rect')
-            .attr('width', 50)
-            .attr('height', 50)
-            .attr('fill', 'none');
-
-        pattern.append('path')
-            .attr('d', 'M 50 0 L 0 0 0 50')
-            .attr('fill', 'none')
-            .attr('stroke', '#2d3748')
-            .attr('stroke-width', 0.5)
-            .attr('opacity', 0.15);
 
         // Node glow effect
         const glow = defs.append('filter')
-            .attr('id', 'glow');
+            .attr('id', 'node-glow');
         glow.append('feGaussianBlur')
-            .attr('stdDeviation', '2.5')
+            .attr('stdDeviation', '3')
             .attr('result', 'coloredBlur');
         const feMerge = glow.append('feMerge');
         feMerge.append('feMergeNode').attr('in', 'coloredBlur');
@@ -150,14 +139,18 @@ export class PassiveTreeViewer {
         this.g = this.svg.append('g')
             .attr('class', 'tree-group');
 
-        // Add background pattern layer
-        this.g.append('rect')
-            .attr('x', -10000)
-            .attr('y', -10000)
-            .attr('width', 20000)
-            .attr('height', 20000)
-            .attr('fill', 'url(#grid-pattern)')
-            .style('pointer-events', 'none');
+        // Create layers in correct order (back to front)
+        this.backgroundLayer = this.g.append('g')
+            .attr('class', 'background-layer');
+
+        this.groupBackgroundLayer = this.g.append('g')
+            .attr('class', 'group-background-layer');
+
+        this.connectionLayer = this.g.append('g')
+            .attr('class', 'connection-layer');
+
+        this.nodeLayer = this.g.append('g')
+            .attr('class', 'node-layer');
 
         // Add zoom behavior
         if (this.options.enableZoom) {
@@ -170,10 +163,10 @@ export class PassiveTreeViewer {
             this.svg.call(this.zoom);
         }
 
-        // Center the view and zoom out to see more of the tree
+        // Center the view and zoom out to see the whole tree
         const initialTransform = d3.zoomIdentity
             .translate(this.options.width / 2, this.options.height / 2)
-            .scale(0.15); // Start zoomed out like PoB
+            .scale(0.15); // Start zoomed out like POE
 
         if (this.zoom) {
             this.svg.call(this.zoom.transform, initialTransform);
@@ -241,18 +234,18 @@ export class PassiveTreeViewer {
                 const apiData = await response.json();
 
                 if (apiData.success && apiData.tree) {
-                    // Store raw tree data for sprite access
-                    const rawTreeData = apiData.tree;
+                    // Store raw tree data for groups, sprites, constants
+                    this.rawTreeData = apiData.tree;
 
                     // Extract sprite data from official tree
-                    if (rawTreeData.sprites && this.options.useSprites) {
-                        this.sprites = rawTreeData.sprites;
-                        console.log(`Loaded ${Object.keys(this.sprites).length} sprite sheets`);
+                    if (this.rawTreeData.sprites && this.options.useSprites) {
+                        this.sprites = this.rawTreeData.sprites;
+                        console.log(`Loaded ${Object.keys(this.sprites).length} sprite sheets from GGG`);
                     }
 
                     // Transform official POE data format to our format
-                    this.treeData = this.transformOfficialTreeData(rawTreeData);
-                    console.log(`Loaded ${apiData.nodeCount} nodes from official POE data`);
+                    this.treeData = this.transformOfficialTreeData(this.rawTreeData);
+                    console.log(`Loaded ${apiData.nodeCount} nodes from official POE data (v3.27.0)`);
                     showToast(`Passive tree loaded (${apiData.nodeCount} nodes)`, 'success');
                 } else {
                     throw new Error('Invalid API response');
