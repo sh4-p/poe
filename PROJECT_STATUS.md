@@ -18,7 +18,7 @@ Exile Architect is a fully functional web application for planning Path of Exile
 - ✅ Data scraping system with automation
 - ✅ Responsive, mobile-first UI
 - ✅ Comprehensive documentation
-- ⏳ Passive tree viewer (placeholder for D3.js implementation)
+- ✅ Passive tree viewer (D3.js implementation complete)
 
 ---
 
