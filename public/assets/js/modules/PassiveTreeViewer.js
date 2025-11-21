@@ -106,6 +106,11 @@ export class PassiveTreeViewer {
         this.spritesLoaded = false;
         this.backgroundPattern = null;
 
+        // Animation state
+        this.animationFrame = null;
+        this.animationTime = 0;
+        this.isAnimating = false;
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -604,6 +609,38 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Start animation loop
+     */
+    startAnimation() {
+        if (this.isAnimating) return;
+
+        this.isAnimating = true;
+        this.animationTime = 0;
+
+        const animate = (timestamp) => {
+            if (!this.isAnimating) return;
+
+            this.animationTime = timestamp;
+            this.render();
+
+            this.animationFrame = requestAnimationFrame(animate);
+        };
+
+        this.animationFrame = requestAnimationFrame(animate);
+    }
+
+    /**
+     * Stop animation loop
+     */
+    stopAnimation() {
+        this.isAnimating = false;
+        if (this.animationFrame) {
+            cancelAnimationFrame(this.animationFrame);
+            this.animationFrame = null;
+        }
+    }
+
+    /**
      * Render main canvas (background + nodes + connections)
      */
     renderMainLayer() {
@@ -1041,6 +1078,11 @@ export class PassiveTreeViewer {
                 // Restore context (remove clip)
                 ctx.restore();
 
+                // Draw mastery glow effect if allocated (animated)
+                if (node.type === 'mastery' && isAllocated) {
+                    this.renderMasteryGlow(ctx, node);
+                }
+
                 // Draw frame overlay (POE official frames)
                 this.renderNodeFrame(ctx, node, isAllocated, isHovered);
 
@@ -1243,6 +1285,77 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Render mastery glow effect (animated)
+     */
+    renderMasteryGlow(ctx, node) {
+        if (!this.sprites?.masteryActiveEffect) return;
+
+        try {
+            const zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+            const zoomKey = String(zoomLevels[this.options.spriteZoomLevel]);
+
+            const effectData = this.sprites.masteryActiveEffect[zoomKey];
+            if (!effectData || !node.icon) return;
+
+            const coords = effectData.coords?.[node.icon];
+            if (!coords) return;
+
+            // Extract filename
+            const cdnUrl = effectData.filename;
+            if (!cdnUrl) return;
+
+            const urlMatch = cdnUrl.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+            if (!urlMatch) return;
+
+            const localFileName = urlMatch[1];
+            const effectUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+            if (!this.spriteImages.has(effectUrl)) {
+                // Load effect sprite
+                this.loadImage(effectUrl).then(() => {
+                    // Start animation when effect loads
+                    if (!this.isAnimating) {
+                        this.startAnimation();
+                    }
+                }).catch(() => {});
+                return;
+            }
+
+            const effectImage = this.spriteImages.get(effectUrl);
+
+            // Calculate pulsing opacity (sine wave)
+            const pulseSpeed = 0.002; // Speed of pulse
+            const minOpacity = 0.3;
+            const maxOpacity = 0.8;
+            const opacity = minOpacity + (maxOpacity - minOpacity) *
+                           (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+            // Calculate scale
+            const nodeRadius = (this.nodeSizes.mastery || this.nodeSizes.normal) / 2;
+            const effectScale = (nodeRadius * 2.5) / Math.max(coords.w, coords.h); // Larger for glow
+
+            const w = coords.w * effectScale;
+            const h = coords.h * effectScale;
+
+            // Draw glow effect
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            ctx.globalCompositeOperation = 'lighter'; // Additive blending for glow
+
+            ctx.drawImage(
+                effectImage,
+                coords.x, coords.y, coords.w, coords.h,
+                node.x - w/2, node.y - h/2, w, h
+            );
+
+            ctx.restore();
+
+        } catch (error) {
+            // Silently fail
+        }
+    }
+
+    /**
      * Render node frame overlay (GGG official frames)
      */
     renderNodeFrame(ctx, node, isAllocated, isHovered) {
@@ -1391,17 +1504,51 @@ export class PassiveTreeViewer {
         this.midCtx.translate(this.viewport.x, this.viewport.y);
         this.midCtx.scale(this.viewport.scale, this.viewport.scale);
 
-        // Draw hover highlight
+        // Draw animated hover highlight
         const radius = (this.nodeSizes[this.hoveredNode.type] || this.nodeSizes.normal) / 2;
 
+        // Pulsing scale animation
+        const pulseSpeed = 0.003;
+        const minScale = 1.0;
+        const maxScale = 1.15;
+        const scale = minScale + (maxScale - minScale) *
+                     (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+        // Pulsing opacity
+        const minOpacity = 0.5;
+        const maxOpacity = 0.9;
+        const opacity = minOpacity + (maxOpacity - minOpacity) *
+                       (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+        // Draw outer glow
+        const glowRadius = (radius + 8) * scale;
+        const gradient = this.midCtx.createRadialGradient(
+            this.hoveredNode.x, this.hoveredNode.y, radius,
+            this.hoveredNode.x, this.hoveredNode.y, glowRadius
+        );
+        gradient.addColorStop(0, 'rgba(245, 158, 11, ' + (opacity * 0.8) + ')');
+        gradient.addColorStop(0.5, 'rgba(245, 158, 11, ' + (opacity * 0.4) + ')');
+        gradient.addColorStop(1, 'rgba(245, 158, 11, 0)');
+
         this.midCtx.beginPath();
-        this.midCtx.arc(this.hoveredNode.x, this.hoveredNode.y, radius + 5, 0, Math.PI * 2);
+        this.midCtx.arc(this.hoveredNode.x, this.hoveredNode.y, glowRadius, 0, Math.PI * 2);
+        this.midCtx.fillStyle = gradient;
+        this.midCtx.fill();
+
+        // Draw inner ring
+        this.midCtx.beginPath();
+        this.midCtx.arc(this.hoveredNode.x, this.hoveredNode.y, (radius + 3) * scale, 0, Math.PI * 2);
         this.midCtx.strokeStyle = '#f59e0b';
-        this.midCtx.lineWidth = 3;
-        this.midCtx.globalAlpha = 0.8;
+        this.midCtx.lineWidth = 2;
+        this.midCtx.globalAlpha = opacity;
         this.midCtx.stroke();
 
         this.midCtx.restore();
+
+        // Ensure animation continues for hover effect
+        if (!this.isAnimating) {
+            this.startAnimation();
+        }
     }
 
     /**
