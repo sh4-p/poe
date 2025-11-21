@@ -898,11 +898,41 @@ export class PassiveTreeViewer {
                 const w = coords.w * spriteScale;
                 const h = coords.h * spriteScale;
 
+                // Save context for clipping
+                ctx.save();
+
+                // Create circular clip path (POE official style)
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius, 0, Math.PI * 2);
+                ctx.clip();
+
+                // Draw sprite (will be clipped to circle)
                 ctx.drawImage(
                     image,
                     coords.x, coords.y, coords.w, coords.h, // Source rectangle
                     node.x - w/2, node.y - h/2, w, h         // Destination rectangle
                 );
+
+                // Restore context (remove clip)
+                ctx.restore();
+
+                // Draw circular frame/border overlay
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius, 0, Math.PI * 2);
+
+                if (isAllocated) {
+                    ctx.strokeStyle = '#f59e0b'; // Gold border for allocated
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                } else if (isHovered) {
+                    ctx.strokeStyle = '#888'; // Gray border for hover
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; // Subtle border for unallocated
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
 
                 return true; // Sprite rendered successfully
 
