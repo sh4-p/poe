@@ -731,6 +731,9 @@ export class PassiveTreeViewer {
             this.centerView();
             this.render();
 
+            // Auto-import from URL hash if present (shared builds)
+            this.importFromLocationHash();
+
         } catch (error) {
             console.error('❌ Failed to load tree data:', error);
             showToast('Failed to load passive tree data', 'error');
@@ -2433,6 +2436,158 @@ export class PassiveTreeViewer {
             currentIndex: this.currentSearchIndex,
             totalResults: this.searchResults.length
         };
+    }
+
+    /**
+     * Export current build to URL-safe string
+     * Format: version|classId|ascendancyId|nodeIds
+     * Compatible with sharing and bookmarking
+     */
+    exportToPoeUrl() {
+        const version = '1'; // Our format version
+        const classId = this.selectedClass?.id || '';
+        const ascendancyId = this.selectedAscendancy || '';
+
+        // Get allocated nodes (exclude class start)
+        const allocatedNodeIds = Array.from(this.allocatedNodes)
+            .filter(nodeId => {
+                const node = this.treeData.nodes.find(n => n.id === nodeId);
+                return node && node.type !== 'classStart';
+            });
+
+        // Build data object
+        const buildData = {
+            version: version,
+            class: classId,
+            ascendancy: ascendancyId,
+            nodes: allocatedNodeIds
+        };
+
+        // Convert to JSON and encode
+        const jsonString = JSON.stringify(buildData);
+        const base64 = btoa(encodeURIComponent(jsonString));
+
+        // Generate URL
+        const baseUrl = window.location.origin + window.location.pathname;
+        const buildUrl = `${baseUrl}#build=${base64}`;
+
+        return buildUrl;
+    }
+
+    /**
+     * Import build from URL
+     * Parses URL hash or full URL with build data
+     */
+    importFromPoeUrl(url) {
+        try {
+            // Extract build data from URL
+            let buildData;
+
+            if (url.includes('#build=')) {
+                // Our format: #build=base64data
+                const hash = url.split('#build=')[1];
+                const decoded = decodeURIComponent(atob(hash));
+                buildData = JSON.parse(decoded);
+            } else if (url.includes('pathofexile.com')) {
+                // POE official URL - not yet implemented
+                showToast('POE official URLs not yet supported. Use export to generate compatible URLs.', 'warning');
+                return false;
+            } else {
+                throw new Error('Invalid URL format');
+            }
+
+            // Validate build data
+            if (!buildData.version || !buildData.nodes) {
+                throw new Error('Invalid build data structure');
+            }
+
+            // Reset current tree
+            this.allocatedNodes.clear();
+
+            // Load class if specified
+            if (buildData.class) {
+                this.selectClass(buildData.class);
+            }
+
+            // Load ascendancy if specified
+            if (buildData.ascendancy) {
+                this.selectedAscendancy = buildData.ascendancy;
+            }
+
+            // Load allocated nodes
+            buildData.nodes.forEach(nodeId => {
+                this.allocatedNodes.add(nodeId);
+            });
+
+            this.updatePointsDisplay();
+            this.centerView();
+            this.render();
+
+            showToast(`Build imported! ${buildData.nodes.length} nodes allocated`, 'success');
+            return true;
+
+        } catch (error) {
+            console.error('Import error:', error);
+            showToast('Failed to import build: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    /**
+     * Copy build URL to clipboard
+     */
+    async copyBuildUrl() {
+        try {
+            const url = this.exportToPoeUrl();
+
+            // Try modern clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(url);
+                showToast('Build URL copied to clipboard!', 'success');
+                return true;
+            }
+
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = url;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            const success = document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            if (success) {
+                showToast('Build URL copied to clipboard!', 'success');
+                return true;
+            } else {
+                throw new Error('Copy command failed');
+            }
+
+        } catch (error) {
+            console.error('Copy error:', error);
+
+            // Show URL in prompt as last resort
+            const url = this.exportToPoeUrl();
+            prompt('Copy this URL:', url);
+            return false;
+        }
+    }
+
+    /**
+     * Import build from URL in browser location hash
+     * Call this on page load to auto-import shared builds
+     */
+    importFromLocationHash() {
+        const hash = window.location.hash;
+
+        if (hash && hash.includes('#build=')) {
+            const url = window.location.href;
+            return this.importFromPoeUrl(url);
+        }
+
+        return false;
     }
 
     /**
