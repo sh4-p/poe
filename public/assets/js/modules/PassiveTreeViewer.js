@@ -129,6 +129,9 @@ export class PassiveTreeViewer {
         this.currentSearchIndex = -1;
         this.searchQuery = '';
 
+        // Mastery effect selections (nodeId -> effectId)
+        this.masterySelections = new Map();
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -2054,6 +2057,23 @@ export class PassiveTreeViewer {
             this.container.appendChild(tooltip);
         }
 
+        // Check if this is a mastery with selected effect
+        let masteryEffectHtml = '';
+        if ((node.isMastery || node.type === 'mastery') && this.allocatedNodes.has(node.id)) {
+            const selectedEffectId = this.masterySelections.get(node.id);
+            if (selectedEffectId && node.masteryEffects) {
+                const effectData = node.masteryEffects.find(e => e.effect === selectedEffectId);
+                if (effectData) {
+                    masteryEffectHtml = `
+                        <div style="color: #60a5fa; font-size: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #444;">
+                            <div style="color: #fbbf24; font-weight: 600; margin-bottom: 4px;">Selected Effect:</div>
+                            ${effectData.stats.map(s => `• ${s}`).join('<br>')}
+                        </div>
+                    `;
+                }
+            }
+        }
+
         tooltip.innerHTML = `
             <div style="font-weight: bold; color: white; margin-bottom: 8px;">
                 ${node.name}
@@ -2063,6 +2083,7 @@ export class PassiveTreeViewer {
                     ${node.stats.map(s => `• ${s}`).join('<br>')}
                 </div>
             ` : ''}
+            ${masteryEffectHtml}
             <div style="color: #666; font-size: 11px; margin-top: 8px;">
                 Click to ${this.allocatedNodes.has(node.id) ? 'deallocate' : 'allocate'}
             </div>
@@ -2088,9 +2109,24 @@ export class PassiveTreeViewer {
      */
     toggleNode(node) {
         if (this.allocatedNodes.has(node.id)) {
+            // Deallocate node
             this.allocatedNodes.delete(node.id);
+
+            // Remove mastery selection if it's a mastery
+            if (node.isMastery || node.type === 'mastery') {
+                this.masterySelections.delete(node.id);
+            }
+
             showToast(`Deallocated: ${node.name}`, 'info');
         } else {
+            // Allocate node
+
+            // If it's a mastery, show effect selection modal
+            if ((node.isMastery || node.type === 'mastery') && node.masteryEffects && node.masteryEffects.length > 0) {
+                this.showMasteryEffectModal(node);
+                return; // Don't allocate yet, wait for user to select effect
+            }
+
             this.allocatedNodes.add(node.id);
             showToast(`Allocated: ${node.name}`, 'success');
         }
@@ -2101,6 +2137,148 @@ export class PassiveTreeViewer {
 
         // Emit event
         this.emit('nodeAllocated', node.id);
+    }
+
+    /**
+     * Show mastery effect selection modal
+     */
+    showMasteryEffectModal(masteryNode) {
+        // Create modal backdrop
+        const backdrop = document.createElement('div');
+        backdrop.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
+        backdrop.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 9999;';
+
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.className = 'bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto';
+        modal.style.cssText = 'background: #1f2937; border-radius: 0.5rem; max-width: 42rem; width: 100%; margin: 1rem; max-height: 80vh; overflow-y: auto; padding: 1.5rem;';
+
+        // Modal header
+        const header = document.createElement('div');
+        header.style.cssText = 'margin-bottom: 1rem; border-bottom: 2px solid #374151; padding-bottom: 1rem;';
+        header.innerHTML = `
+            <h3 style="color: #f59e0b; font-size: 1.5rem; font-weight: bold; margin: 0;">${masteryNode.name}</h3>
+            <p style="color: #9ca3af; font-size: 0.875rem; margin-top: 0.5rem;">Select a mastery effect:</p>
+        `;
+
+        // Effects list
+        const effectsList = document.createElement('div');
+        effectsList.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem;';
+
+        masteryNode.masteryEffects.forEach((effectData, index) => {
+            const effectButton = document.createElement('button');
+            effectButton.style.cssText = `
+                background: #374151;
+                border: 2px solid #4b5563;
+                border-radius: 0.375rem;
+                padding: 1rem;
+                text-align: left;
+                cursor: pointer;
+                transition: all 0.2s;
+                color: #e5e7eb;
+            `;
+
+            // Hover effect
+            effectButton.onmouseenter = () => {
+                effectButton.style.background = '#4b5563';
+                effectButton.style.borderColor = '#f59e0b';
+            };
+            effectButton.onmouseleave = () => {
+                effectButton.style.background = '#374151';
+                effectButton.style.borderColor = '#4b5563';
+            };
+
+            // Effect stats
+            const statsHtml = effectData.stats.map(stat =>
+                `<div style="color: #60a5fa; font-size: 0.95rem; margin-top: 0.25rem;">• ${stat}</div>`
+            ).join('');
+
+            effectButton.innerHTML = `
+                <div style="font-weight: 600; color: #fbbf24; margin-bottom: 0.5rem;">Effect ${index + 1}</div>
+                ${statsHtml}
+            `;
+
+            effectButton.onclick = () => {
+                this.selectMasteryEffect(masteryNode, effectData.effect);
+                document.body.removeChild(backdrop);
+            };
+
+            effectsList.appendChild(effectButton);
+        });
+
+        // Cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.style.cssText = `
+            background: #6b7280;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.375rem;
+            border: none;
+            cursor: pointer;
+            margin-top: 1rem;
+            width: 100%;
+            font-weight: 600;
+        `;
+        cancelButton.textContent = 'Cancel';
+        cancelButton.onclick = () => {
+            document.body.removeChild(backdrop);
+        };
+
+        // Assemble modal
+        modal.appendChild(header);
+        modal.appendChild(effectsList);
+        modal.appendChild(cancelButton);
+        backdrop.appendChild(modal);
+
+        // Close on backdrop click
+        backdrop.onclick = (e) => {
+            if (e.target === backdrop) {
+                document.body.removeChild(backdrop);
+            }
+        };
+
+        // Close on ESC key
+        const handleEsc = (e) => {
+            if (e.key === 'Escape') {
+                document.body.removeChild(backdrop);
+                document.removeEventListener('keydown', handleEsc);
+            }
+        };
+        document.addEventListener('keydown', handleEsc);
+
+        // Add to DOM
+        document.body.appendChild(backdrop);
+    }
+
+    /**
+     * Select mastery effect and allocate node
+     */
+    selectMasteryEffect(masteryNode, effectId) {
+        // Store the selection
+        this.masterySelections.set(masteryNode.id, effectId);
+
+        // Allocate the mastery node
+        this.allocatedNodes.add(masteryNode.id);
+
+        // Get effect stats for display
+        const effectData = masteryNode.masteryEffects.find(e => e.effect === effectId);
+        const effectText = effectData?.stats[0] || 'Mastery effect';
+
+        showToast(`Allocated: ${masteryNode.name} - ${effectText}`, 'success');
+
+        this.markAllTilesDirty();
+        this.render();
+        this.updatePointsDisplay();
+
+        // Emit event
+        this.emit('nodeAllocated', masteryNode.id);
+    }
+
+    /**
+     * Get selected mastery effect for a node
+     */
+    getMasteryEffect(nodeId) {
+        return this.masterySelections.get(nodeId);
     }
 
     /**
@@ -2460,7 +2638,8 @@ export class PassiveTreeViewer {
             version: version,
             class: classId,
             ascendancy: ascendancyId,
-            nodes: allocatedNodeIds
+            nodes: allocatedNodeIds,
+            masterySelections: Object.fromEntries(this.masterySelections)
         };
 
         // Convert to JSON and encode
@@ -2503,6 +2682,7 @@ export class PassiveTreeViewer {
 
             // Reset current tree
             this.allocatedNodes.clear();
+            this.masterySelections.clear();
 
             // Load class if specified
             if (buildData.class) {
@@ -2518,6 +2698,13 @@ export class PassiveTreeViewer {
             buildData.nodes.forEach(nodeId => {
                 this.allocatedNodes.add(nodeId);
             });
+
+            // Load mastery selections
+            if (buildData.masterySelections) {
+                Object.entries(buildData.masterySelections).forEach(([nodeId, effectId]) => {
+                    this.masterySelections.set(nodeId, effectId);
+                });
+            }
 
             this.updatePointsDisplay();
             this.centerView();
@@ -2679,6 +2866,7 @@ export class PassiveTreeViewer {
             name: buildName,
             class: this.selectedClass?.id || null,
             allocatedNodes: Array.from(this.allocatedNodes),
+            masterySelections: Object.fromEntries(this.masterySelections),
             timestamp: Date.now(),
             version: '1.0'
         };
@@ -2712,6 +2900,7 @@ export class PassiveTreeViewer {
 
         // Reset current tree
         this.allocatedNodes.clear();
+        this.masterySelections.clear();
 
         // Load class
         if (build.class) {
@@ -2722,6 +2911,13 @@ export class PassiveTreeViewer {
         build.allocatedNodes.forEach(nodeId => {
             this.allocatedNodes.add(nodeId);
         });
+
+        // Load mastery selections
+        if (build.masterySelections) {
+            Object.entries(build.masterySelections).forEach(([nodeId, effectId]) => {
+                this.masterySelections.set(nodeId, effectId);
+            });
+        }
 
         this.currentBuildName = buildName;
         this.updatePointsDisplay();
@@ -2769,6 +2965,7 @@ export class PassiveTreeViewer {
             name: this.currentBuildName || 'Unnamed Build',
             class: this.selectedClass?.id || null,
             allocatedNodes: Array.from(this.allocatedNodes),
+            masterySelections: Object.fromEntries(this.masterySelections),
             timestamp: Date.now(),
             version: '1.0'
         };
@@ -2800,6 +2997,7 @@ export class PassiveTreeViewer {
 
             // Reset tree
             this.allocatedNodes.clear();
+            this.masterySelections.clear();
 
             // Load class
             if (build.class) {
@@ -2810,6 +3008,13 @@ export class PassiveTreeViewer {
             build.allocatedNodes.forEach(nodeId => {
                 this.allocatedNodes.add(nodeId);
             });
+
+            // Load mastery selections
+            if (build.masterySelections) {
+                Object.entries(build.masterySelections).forEach(([nodeId, effectId]) => {
+                    this.masterySelections.set(nodeId, effectId);
+                });
+            }
 
             this.currentBuildName = build.name || 'Imported Build';
             this.updatePointsDisplay();
