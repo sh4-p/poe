@@ -98,17 +98,36 @@ export class PassiveTreeViewer {
         // Clear container
         this.container.innerHTML = '';
 
-        // Create SVG
+        // Create SVG with PoB-style background
         this.svg = d3.select(this.container)
             .append('svg')
             .attr('width', '100%')
             .attr('height', '100%')
             .attr('viewBox', `0 0 ${this.options.width} ${this.options.height}`)
-            .style('background', '#0a0a0a')
+            .style('background', 'radial-gradient(circle at center, #1a202c 0%, #0d1117 100%)')
             .style('border-radius', '8px');
 
         // Add definitions for gradients and patterns
         const defs = this.svg.append('defs');
+
+        // Subtle grid pattern (PoB style)
+        const pattern = defs.append('pattern')
+            .attr('id', 'grid-pattern')
+            .attr('width', 50)
+            .attr('height', 50)
+            .attr('patternUnits', 'userSpaceOnUse');
+
+        pattern.append('rect')
+            .attr('width', 50)
+            .attr('height', 50)
+            .attr('fill', 'none');
+
+        pattern.append('path')
+            .attr('d', 'M 50 0 L 0 0 0 50')
+            .attr('fill', 'none')
+            .attr('stroke', '#2d3748')
+            .attr('stroke-width', 0.5)
+            .attr('opacity', 0.15);
 
         // Node glow effect
         const glow = defs.append('filter')
@@ -124,6 +143,15 @@ export class PassiveTreeViewer {
         this.g = this.svg.append('g')
             .attr('class', 'tree-group');
 
+        // Add background pattern layer
+        this.g.append('rect')
+            .attr('x', -10000)
+            .attr('y', -10000)
+            .attr('width', 20000)
+            .attr('height', 20000)
+            .attr('fill', 'url(#grid-pattern)')
+            .style('pointer-events', 'none');
+
         // Add zoom behavior
         if (this.options.enableZoom) {
             this.zoom = d3.zoom()
@@ -135,10 +163,10 @@ export class PassiveTreeViewer {
             this.svg.call(this.zoom);
         }
 
-        // Center the view
+        // Center the view and zoom out to see more of the tree
         const initialTransform = d3.zoomIdentity
             .translate(this.options.width / 2, this.options.height / 2)
-            .scale(1);
+            .scale(0.15); // Start zoomed out like PoB
 
         if (this.zoom) {
             this.svg.call(this.zoom.transform, initialTransform);
@@ -491,7 +519,7 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Render the tree
+     * Render the tree (PoB style - cleaner visualization)
      */
     renderTree() {
         if (!this.treeData) return;
@@ -499,64 +527,139 @@ export class PassiveTreeViewer {
         // Clear existing
         this.g.selectAll('*').remove();
 
-        // Draw links
-        const link = this.g.append('g')
+        // Create node lookup for performance
+        const nodeMap = new Map(this.treeData.nodes.map(n => [n.id, n]));
+
+        // Filter nodes - only show important ones for clarity
+        // In a real build, we'd only show allocated + nearby nodes
+        const visibleNodes = this.treeData.nodes.filter(n =>
+            n.type === 'keystone' ||
+            n.type === 'notable' ||
+            n.type === 'mastery' ||
+            n.type === 'jewel' ||
+            n.type === 'classStart' ||
+            n.type === 'root' ||
+            this.allocatedNodes.has(n.id)
+        );
+
+        // Draw connection lines (thinner, darker)
+        const linkGroup = this.g.append('g')
             .attr('class', 'links')
-            .selectAll('line')
-            .data(this.treeData.links)
-            .enter()
-            .append('line')
-            .attr('x1', d => {
-                const source = this.treeData.nodes.find(n => n.id === d.source);
-                return source ? source.x : 0;
-            })
-            .attr('y1', d => {
-                const source = this.treeData.nodes.find(n => n.id === d.source);
-                return source ? source.y : 0;
-            })
-            .attr('x2', d => {
-                const target = this.treeData.nodes.find(n => n.id === d.target);
-                return target ? target.x : 0;
-            })
-            .attr('y2', d => {
-                const target = this.treeData.nodes.find(n => n.id === d.target);
-                return target ? target.y : 0;
-            })
-            .attr('stroke', '#333')
-            .attr('stroke-width', 2);
+            .style('opacity', 0.3);
 
-        // Draw nodes
-        const node = this.g.append('g')
-            .attr('class', 'nodes')
-            .selectAll('circle')
-            .data(this.treeData.nodes)
-            .enter()
-            .append('circle')
-            .attr('cx', d => d.x)
-            .attr('cy', d => d.y)
-            .attr('r', d => this.getNodeRadius(d))
-            .attr('fill', d => this.getNodeColor(d))
-            .attr('stroke', '#555')
-            .attr('stroke-width', 2)
-            .style('cursor', 'pointer')
-            .on('click', (event, d) => this.handleNodeClick(event, d))
-            .on('mouseenter', (event, d) => this.handleNodeHover(event, d))
-            .on('mouseleave', () => this.handleNodeLeave());
+        this.treeData.links.forEach(link => {
+            const source = nodeMap.get(link.source);
+            const target = nodeMap.get(link.target);
 
-        // Add node labels
-        const label = this.g.append('g')
-            .attr('class', 'labels')
-            .selectAll('text')
-            .data(this.treeData.nodes.filter(n => n.type !== 'normal'))
-            .enter()
-            .append('text')
-            .attr('x', d => d.x)
-            .attr('y', d => d.y + this.getNodeRadius(d) + 15)
-            .attr('text-anchor', 'middle')
-            .attr('fill', '#fff')
-            .attr('font-size', '10px')
-            .style('pointer-events', 'none')
-            .text(d => d.name);
+            if (!source || !target) return;
+
+            // Only draw links between visible important nodes
+            const sourceVisible = visibleNodes.find(n => n.id === source.id);
+            const targetVisible = visibleNodes.find(n => n.id === target.id);
+
+            if (!sourceVisible && !targetVisible) return;
+
+            linkGroup.append('line')
+                .attr('x1', source.x)
+                .attr('y1', source.y)
+                .attr('x2', target.x)
+                .attr('y2', target.y)
+                .attr('stroke', this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id) ? '#d4af37' : '#444')
+                .attr('stroke-width', this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id) ? 3 : 1.5)
+                .attr('stroke-linecap', 'round');
+        });
+
+        // Draw all normal nodes as tiny dots (for context)
+        const normalNodes = this.g.append('g')
+            .attr('class', 'normal-nodes')
+            .style('opacity', 0.25);
+
+        this.treeData.nodes
+            .filter(n => n.type === 'normal' && !this.allocatedNodes.has(n.id))
+            .forEach(node => {
+                normalNodes.append('circle')
+                    .attr('cx', node.x)
+                    .attr('cy', node.y)
+                    .attr('r', 3)
+                    .attr('fill', '#666')
+                    .attr('stroke', 'none');
+            });
+
+        // Draw important nodes (keystones, notables, etc.)
+        const nodeGroup = this.g.append('g')
+            .attr('class', 'important-nodes');
+
+        visibleNodes.forEach(node => {
+            const isAllocated = this.allocatedNodes.has(node.id);
+            const g = nodeGroup.append('g')
+                .attr('class', 'node')
+                .attr('transform', `translate(${node.x}, ${node.y})`)
+                .style('cursor', 'pointer')
+                .on('click', (event) => this.handleNodeClick(event, node))
+                .on('mouseenter', (event) => this.handleNodeHover(event, node))
+                .on('mouseleave', () => this.handleNodeLeave());
+
+            // Glow effect for allocated nodes
+            if (isAllocated) {
+                g.append('circle')
+                    .attr('r', this.getNodeRadius(node) + 4)
+                    .attr('fill', 'none')
+                    .attr('stroke', '#f59e0b')
+                    .attr('stroke-width', 2)
+                    .style('opacity', 0.6)
+                    .style('filter', 'blur(3px)');
+            }
+
+            // Main node circle
+            g.append('circle')
+                .attr('r', this.getNodeRadius(node))
+                .attr('fill', isAllocated ? this.getNodeColor(node) : '#2d3748')
+                .attr('stroke', isAllocated ? '#f59e0b' : this.getNodeColor(node))
+                .attr('stroke-width', isAllocated ? 2.5 : 2)
+                .style('opacity', isAllocated ? 1 : 0.7);
+
+            // Inner circle for special nodes
+            if (node.type === 'keystone' || node.type === 'mastery') {
+                g.append('circle')
+                    .attr('r', this.getNodeRadius(node) - 4)
+                    .attr('fill', 'none')
+                    .attr('stroke', isAllocated ? '#fff' : this.getNodeColor(node))
+                    .attr('stroke-width', 1.5)
+                    .style('opacity', isAllocated ? 0.8 : 0.5);
+            }
+
+            // Node icon placeholder (would be sprite in full implementation)
+            if (node.type !== 'normal') {
+                g.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'central')
+                    .attr('fill', isAllocated ? '#000' : '#888')
+                    .attr('font-size', '10px')
+                    .attr('font-weight', 'bold')
+                    .style('pointer-events', 'none')
+                    .text(this.getNodeIcon(node.type));
+            }
+        });
+
+        // Add labels for keystones and allocated notables only
+        const labelGroup = this.g.append('g')
+            .attr('class', 'labels');
+
+        visibleNodes
+            .filter(n => n.type === 'keystone' || (n.type === 'notable' && this.allocatedNodes.has(n.id)))
+            .forEach(node => {
+                labelGroup.append('text')
+                    .attr('x', node.x)
+                    .attr('y', node.y + this.getNodeRadius(node) + 14)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', this.allocatedNodes.has(node.id) ? '#f59e0b' : '#a0aec0')
+                    .attr('font-size', '11px')
+                    .attr('font-weight', this.allocatedNodes.has(node.id) ? 'bold' : 'normal')
+                    .style('pointer-events', 'none')
+                    .text(node.name || '');
+            });
+
+        console.log(`Rendered ${visibleNodes.length} important nodes (total: ${this.treeData.nodes.length})`);
     }
 
     /**
@@ -595,6 +698,23 @@ export class PassiveTreeViewer {
             case 'bloodline': return '#f97316'; // Orange for bloodline
             default: return '#6b7280'; // Gray for normal nodes
         }
+    }
+
+    /**
+     * Get icon for node type (placeholder until we implement sprites)
+     */
+    getNodeIcon(type) {
+        const icons = {
+            'root': '◆',
+            'classStart': '★',
+            'keystone': '◈',
+            'mastery': '✦',
+            'jewel': '◎',
+            'notable': '●',
+            'ascendancy': '◆',
+            'bloodline': '◇'
+        };
+        return icons[type] || '·';
     }
 
     /**

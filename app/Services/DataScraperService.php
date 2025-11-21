@@ -36,6 +36,36 @@ class DataScraperService
     }
 
     /**
+     * Get latest POE version from GitHub releases
+     */
+    private function getLatestTreeVersion(): string
+    {
+        try {
+            $response = $this->httpClient->get('https://api.github.com/repos/grindinggear/skilltree-export/tags', [
+                'headers' => [
+                    'Accept' => 'application/vnd.github.v3+json',
+                    'User-Agent' => $this->config['user_agent']
+                ],
+                'timeout' => 10
+            ]);
+
+            $tags = json_decode($response->getBody()->getContents(), true);
+
+            if (!empty($tags) && isset($tags[0]['name'])) {
+                $latestVersion = $tags[0]['name'];
+                echo "  Latest POE version: {$latestVersion}\n";
+                return $latestVersion;
+            }
+        } catch (\Exception $e) {
+            echo "  ⚠ Could not fetch latest version: " . $e->getMessage() . "\n";
+        }
+
+        // Fallback to master
+        echo "  Using master branch as fallback\n";
+        return 'master';
+    }
+
+    /**
      * Scrape passive tree from official POE sources
      */
     public function scrapePassiveTree(string $version = 'latest'): bool
@@ -43,19 +73,27 @@ class DataScraperService
         echo "📊 Scraping passive tree data from official POE sources...\n";
 
         try {
+            // Get latest version tag from GitHub API
+            $latestVersion = $this->getLatestTreeVersion();
+
             // POE API endpoints (in order of preference)
             $sources = [
-                // 1. Official Grinding Gear Games skilltree-export (MOST RELIABLE - Official)
+                // 1. Official Grinding Gear Games skilltree-export - LATEST PATCH
+                [
+                    'url' => "https://raw.githubusercontent.com/grindinggear/skilltree-export/{$latestVersion}/data.json",
+                    'name' => "GGG Official Skill Tree Export (v{$latestVersion})"
+                ],
+                // 2. Fallback to master branch if tag fails
                 [
                     'url' => 'https://raw.githubusercontent.com/grindinggear/skilltree-export/master/data.json',
-                    'name' => 'GGG Official Skill Tree Export'
+                    'name' => 'GGG Official Skill Tree Export (master)'
                 ],
-                // 2. Path of Building Community (community-maintained, frequently updated)
+                // 3. Path of Building Community (community-maintained, frequently updated)
                 [
                     'url' => 'https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding/master/src/Data/3_0/PassiveSkillTree.json',
                     'name' => 'PoB Community GitHub'
                 ],
-                // 3. POE Tool Dev (alternative source)
+                // 4. POE Tool Dev (alternative source)
                 [
                     'url' => 'https://raw.githubusercontent.com/poe-tool-dev/passive-skill-tree-json/master/data.json',
                     'name' => 'POE Tool Dev'
