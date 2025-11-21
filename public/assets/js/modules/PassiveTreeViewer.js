@@ -320,6 +320,68 @@ export class PassiveTreeViewer {
         });
 
         this.topCanvas.style.cursor = 'grab';
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+    }
+
+    /**
+     * Handle keyboard shortcuts
+     */
+    handleKeyboard(e) {
+        // Ignore if typing in input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        const panSpeed = 50; // pixels
+
+        switch(e.key.toLowerCase()) {
+            case 'w':
+            case 'arrowup':
+                this.viewport.y += panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case 's':
+            case 'arrowdown':
+                this.viewport.y -= panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case 'a':
+            case 'arrowleft':
+                this.viewport.x += panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case 'd':
+            case 'arrowright':
+                this.viewport.x -= panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case '+':
+            case '=':
+                this.zoomIn();
+                e.preventDefault();
+                break;
+            case '-':
+            case '_':
+                this.zoomOut();
+                e.preventDefault();
+                break;
+            case 'r':
+                this.centerView();
+                e.preventDefault();
+                break;
+            case 'escape':
+                this.resetTree();
+                e.preventDefault();
+                break;
+        }
     }
 
     /**
@@ -781,6 +843,7 @@ export class PassiveTreeViewer {
     /**
      * Render connections (arc for same orbit, straight for different)
      * Filters out connections to hidden ascendancy/bloodline nodes
+     * Highlights allocated paths
      */
     renderConnections(ctx) {
         if (!this.treeData?.links) return;
@@ -809,6 +872,7 @@ export class PassiveTreeViewer {
 
             const isAllocated = this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id);
             const isPartial = this.allocatedNodes.has(source.id) || this.allocatedNodes.has(target.id);
+            const isPath = isAllocated; // Both nodes allocated = path
 
             // Determine connection style
             if (source.orbit === target.orbit && source.group === target.group) {
@@ -862,21 +926,30 @@ export class PassiveTreeViewer {
         ctx.lineTo(target.x, target.y);
 
         if (isAllocated) {
-            ctx.strokeStyle = '#b89968';
-            ctx.lineWidth = 4;
-            ctx.globalAlpha = 0.9;
+            // Draw glow for allocated paths
+            ctx.save();
+            ctx.shadowColor = '#f59e0b';
+            ctx.shadowBlur = 6;
+            ctx.strokeStyle = '#d4af37'; // Brighter gold
+            ctx.lineWidth = 5;
+            ctx.globalAlpha = 1.0;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.restore();
         } else if (isPartial) {
             ctx.strokeStyle = '#7a6f5c';
             ctx.lineWidth = 3;
             ctx.globalAlpha = 0.6;
+            ctx.lineCap = 'round';
+            ctx.stroke();
         } else {
             ctx.strokeStyle = '#4a4a4a';
             ctx.lineWidth = 2;
             ctx.globalAlpha = 0.3;
+            ctx.lineCap = 'round';
+            ctx.stroke();
         }
 
-        ctx.lineCap = 'round';
-        ctx.stroke();
         ctx.globalAlpha = 1.0;
     }
 
@@ -1641,13 +1714,60 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Update points display
+     * Update points display (accurate POE counting)
      */
     updatePointsDisplay() {
         const pointsEl = document.getElementById('points-used');
         if (pointsEl) {
-            pointsEl.textContent = this.allocatedNodes.size;
+            // Count only actual passive points (exclude class start, ascendancy class start, mastery)
+            let passivePoints = 0;
+
+            this.allocatedNodes.forEach(nodeId => {
+                const node = this.treeData.nodes.find(n => n.id === nodeId);
+                if (!node) return;
+
+                // Exclude these from point count (POE official rules)
+                if (node.type === 'classStart') return; // Class start is free
+                if (node.type === 'ascendancy') return; // Ascendancy points counted separately
+                if (node.type === 'mastery') return; // Masteries are free
+
+                passivePoints++;
+            });
+
+            pointsEl.textContent = passivePoints;
         }
+    }
+
+    /**
+     * Get allocated counts by type
+     */
+    getAllocatedCounts() {
+        const counts = {
+            normal: 0,
+            notable: 0,
+            keystone: 0,
+            jewel: 0,
+            mastery: 0,
+            ascendancy: 0,
+            total: 0
+        };
+
+        this.allocatedNodes.forEach(nodeId => {
+            const node = this.treeData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            const type = node.type;
+            if (counts.hasOwnProperty(type)) {
+                counts[type]++;
+            }
+
+            // Count towards total (excluding class start and masteries)
+            if (type !== 'classStart' && type !== 'mastery' && type !== 'ascendancy') {
+                counts.total++;
+            }
+        });
+
+        return counts;
     }
 
     /**
