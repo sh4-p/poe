@@ -18,8 +18,8 @@ export class PassiveTreeViewer {
             width: 1200,
             height: 800,
             tileSize: 512, // POE uses 512x512 tiles
-            assetBaseUrl: 'https://raw.githubusercontent.com/grindinggear/skilltree-export/3.27.0/assets/',
-            spriteZoomLevel: 2, // 0=low, 1=med, 2=high, 3=max
+            assetBaseUrl: '/assets/images/passive-tree/', // POE official assets (local)
+            spriteZoomLevel: 2, // 0=low, 1=med, 2=high, 3=max (0.2972 zoom)
             ...options
         };
 
