@@ -446,43 +446,54 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Load tree data
+     * Load tree data from local JSON file (GGG skilltree-export)
      */
-    async loadTree() {
+    async loadTree(variant = 'default') {
         try {
             showToast('Loading passive tree...', 'info', 1000);
 
-            const response = await fetch('/api/passive-tree?version=latest');
+            // Map variants to file paths (GGG skilltree-export 3.27.0)
+            const variantFiles = {
+                'default': '/data/passive-tree-3.27.0.json',
+                'alternate': '/data/passive-tree-3.27.0-alternate.json',
+                'ruthless': '/data/passive-tree-3.27.0-ruthless.json',
+                'ruthless-alternate': '/data/passive-tree-3.27.0-ruthless-alternate.json'
+            };
 
-            if (response.ok) {
-                const apiData = await response.json();
+            const dataUrl = variantFiles[variant] || variantFiles.default;
 
-                if (apiData.success && apiData.tree) {
-                    this.rawTreeData = apiData.tree;
+            console.log(`📥 Loading tree data from: ${dataUrl}`);
+            const response = await fetch(dataUrl);
 
-                    // Extract sprites
-                    if (this.rawTreeData.sprites) {
-                        this.sprites = this.rawTreeData.sprites;
-                        console.log(`Loaded ${Object.keys(this.sprites).length} sprite sheets`);
-                    }
-
-                    // Transform data
-                    this.treeData = this.transformOfficialTreeData(this.rawTreeData);
-                    console.log(`Loaded ${apiData.nodeCount} nodes from official POE data`);
-
-                    showToast(`Passive tree loaded (${apiData.nodeCount} nodes)`, 'success');
-
-                    // Initial render
-                    this.centerView();
-                    this.render();
-                }
-            } else {
-                throw new Error('API failed');
+            if (!response.ok) {
+                throw new Error(`Failed to fetch tree data: ${response.status}`);
             }
 
+            // Load raw tree data (GGG official format)
+            this.rawTreeData = await response.json();
+
+            // Extract sprites metadata
+            if (this.rawTreeData.sprites) {
+                this.sprites = this.rawTreeData.sprites;
+                console.log(`✅ Loaded ${Object.keys(this.sprites).length} sprite sheet definitions`);
+            }
+
+            // Transform GGG format to our format
+            this.treeData = this.transformOfficialTreeData(this.rawTreeData);
+
+            const nodeCount = this.treeData.nodes.length;
+            const linkCount = this.treeData.links.length;
+
+            console.log(`✅ Transformed ${nodeCount} nodes and ${linkCount} connections`);
+            showToast(`Passive tree loaded (${nodeCount} nodes)`, 'success');
+
+            // Initial render
+            this.centerView();
+            this.render();
+
         } catch (error) {
-            console.error('Failed to load tree:', error);
-            showToast('Failed to load tree data', 'error');
+            console.error('❌ Failed to load tree data:', error);
+            showToast('Failed to load passive tree data', 'error');
         }
     }
 
