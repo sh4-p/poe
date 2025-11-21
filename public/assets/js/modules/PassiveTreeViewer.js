@@ -124,6 +124,11 @@ export class PassiveTreeViewer {
         this.touchStartY = 0;
         this.isTouching = false;
 
+        // Search functionality
+        this.searchResults = [];
+        this.currentSearchIndex = -1;
+        this.searchQuery = '';
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -397,8 +402,36 @@ export class PassiveTreeViewer {
                 e.preventDefault();
                 break;
             case 'escape':
-                this.resetTree();
+                // Clear search if active, otherwise reset tree
+                if (this.searchResults.length > 0) {
+                    this.clearSearch();
+                } else {
+                    this.resetTree();
+                }
                 e.preventDefault();
+                break;
+            case 'f3':
+                // Navigate search results
+                if (e.shiftKey) {
+                    this.previousSearchResult();
+                } else {
+                    this.nextSearchResult();
+                }
+                e.preventDefault();
+                break;
+            case 'n':
+                // Next search result (Ctrl+N or Cmd+N)
+                if (e.ctrlKey || e.metaKey) {
+                    this.nextSearchResult();
+                    e.preventDefault();
+                }
+                break;
+            case 'p':
+                // Previous search result (Ctrl+P or Cmd+P)
+                if (e.ctrlKey || e.metaKey) {
+                    this.previousSearchResult();
+                    e.preventDefault();
+                }
                 break;
         }
     }
@@ -1834,22 +1867,101 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Render search result highlights
+     */
+    renderSearchHighlights(ctx) {
+        if (!this.searchResults || this.searchResults.length === 0) return;
+
+        this.searchResults.forEach((result, index) => {
+            const node = result.node;
+            const nodeRadius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
+            const isCurrent = index === this.currentSearchIndex;
+
+            ctx.save();
+
+            // Different style for current result vs other results
+            if (isCurrent) {
+                // Current result: bright green pulsing glow
+                const pulseSpeed = 0.003;
+                const minOpacity = 0.5;
+                const maxOpacity = 1.0;
+                const opacity = minOpacity + (maxOpacity - minOpacity) *
+                               (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+                // Outer glow
+                const glowRadius = nodeRadius * 2.5;
+                const gradient = ctx.createRadialGradient(
+                    node.x, node.y, nodeRadius,
+                    node.x, node.y, glowRadius
+                );
+                gradient.addColorStop(0, 'rgba(34, 197, 94, ' + (opacity * 0.8) + ')'); // Green
+                gradient.addColorStop(0.5, 'rgba(34, 197, 94, ' + (opacity * 0.4) + ')');
+                gradient.addColorStop(1, 'rgba(34, 197, 94, 0)');
+
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                // Ring
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius + 4, 0, Math.PI * 2);
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 3;
+                ctx.globalAlpha = opacity;
+                ctx.stroke();
+            } else {
+                // Other results: subtle yellow glow
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius + 3, 0, Math.PI * 2);
+                ctx.strokeStyle = '#eab308';
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.5;
+                ctx.stroke();
+
+                // Small yellow dot
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#eab308';
+                ctx.globalAlpha = 0.7;
+                ctx.fill();
+            }
+
+            ctx.restore();
+        });
+
+        // Ensure animation continues for search highlights
+        if (this.searchResults.length > 0 && !this.isAnimating) {
+            this.startAnimation();
+        }
+    }
+
+    /**
      * Render mid canvas (highlights and animations)
      */
     renderMidLayer() {
         // Clear
         this.midCtx.clearRect(0, 0, this.options.width, this.options.height);
 
-        if (!this.hoveredNode) return;
-
         // Save context
         this.midCtx.save();
         this.midCtx.translate(this.viewport.x, this.viewport.y);
         this.midCtx.scale(this.viewport.scale, this.viewport.scale);
 
-        // Draw path preview if available
-        if (this.pathToHoveredNode?.path && this.pathToHoveredNode.path.length > 1) {
+        // Draw search result highlights (if any)
+        if (this.searchResults.length > 0) {
+            this.renderSearchHighlights(this.midCtx);
+        }
+
+        // Draw path preview if available (only if hovering)
+        if (this.hoveredNode && this.pathToHoveredNode?.path && this.pathToHoveredNode.path.length > 1) {
             this.renderPathPreview(this.midCtx, this.pathToHoveredNode);
+        }
+
+        // Draw animated hover highlight (only if hovering)
+        if (!this.hoveredNode) {
+            this.midCtx.restore();
+            return;
         }
 
         // Draw animated hover highlight
@@ -2182,6 +2294,145 @@ export class PassiveTreeViewer {
         });
 
         return cost;
+    }
+
+    /**
+     * Search nodes by name, type, or stats
+     * Returns array of matching nodes
+     */
+    searchNodes(query) {
+        if (!query || !this.treeData?.nodes) {
+            this.searchResults = [];
+            this.currentSearchIndex = -1;
+            this.searchQuery = '';
+            this.render();
+            return [];
+        }
+
+        this.searchQuery = query.toLowerCase();
+        const results = [];
+
+        this.treeData.nodes.forEach(node => {
+            // Search by name
+            if (node.name && node.name.toLowerCase().includes(this.searchQuery)) {
+                results.push({
+                    node: node,
+                    matchType: 'name',
+                    matchText: node.name
+                });
+                return;
+            }
+
+            // Search by type
+            if (node.type && node.type.toLowerCase().includes(this.searchQuery)) {
+                results.push({
+                    node: node,
+                    matchType: 'type',
+                    matchText: node.type
+                });
+                return;
+            }
+
+            // Search by stats (if available)
+            if (node.stats && Array.isArray(node.stats)) {
+                for (const stat of node.stats) {
+                    if (stat.toLowerCase().includes(this.searchQuery)) {
+                        results.push({
+                            node: node,
+                            matchType: 'stat',
+                            matchText: stat
+                        });
+                        return;
+                    }
+                }
+            }
+        });
+
+        this.searchResults = results;
+        this.currentSearchIndex = results.length > 0 ? 0 : -1;
+
+        // Navigate to first result
+        if (this.currentSearchIndex >= 0) {
+            this.navigateToSearchResult(0);
+        }
+
+        return results;
+    }
+
+    /**
+     * Navigate to specific search result
+     */
+    navigateToSearchResult(index) {
+        if (index < 0 || index >= this.searchResults.length) {
+            return false;
+        }
+
+        this.currentSearchIndex = index;
+        const result = this.searchResults[index];
+        const node = result.node;
+
+        // Center view on the node
+        const centerX = this.options.width / 2;
+        const centerY = this.options.height / 2;
+
+        this.viewport.x = centerX - (node.x * this.viewport.scale);
+        this.viewport.y = centerY - (node.y * this.viewport.scale);
+
+        this.markAllTilesDirty();
+        this.render();
+
+        // Show result info
+        const resultNumber = index + 1;
+        const totalResults = this.searchResults.length;
+        showToast(
+            `Result ${resultNumber}/${totalResults}: ${node.name} (${result.matchType})`,
+            'info'
+        );
+
+        return true;
+    }
+
+    /**
+     * Go to next search result
+     */
+    nextSearchResult() {
+        if (this.searchResults.length === 0) return false;
+
+        const nextIndex = (this.currentSearchIndex + 1) % this.searchResults.length;
+        return this.navigateToSearchResult(nextIndex);
+    }
+
+    /**
+     * Go to previous search result
+     */
+    previousSearchResult() {
+        if (this.searchResults.length === 0) return false;
+
+        const prevIndex = (this.currentSearchIndex - 1 + this.searchResults.length) % this.searchResults.length;
+        return this.navigateToSearchResult(prevIndex);
+    }
+
+    /**
+     * Clear search results
+     */
+    clearSearch() {
+        this.searchResults = [];
+        this.currentSearchIndex = -1;
+        this.searchQuery = '';
+        this.render();
+        showToast('Search cleared', 'info');
+    }
+
+    /**
+     * Get current search state
+     */
+    getSearchState() {
+        return {
+            query: this.searchQuery,
+            results: this.searchResults,
+            currentIndex: this.currentSearchIndex,
+            totalResults: this.searchResults.length
+        };
     }
 
     /**
