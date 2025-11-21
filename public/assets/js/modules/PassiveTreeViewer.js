@@ -106,6 +106,11 @@ export class PassiveTreeViewer {
         this.spritesLoaded = false;
         this.backgroundPattern = null;
 
+        // Animation state
+        this.animationFrame = null;
+        this.animationTime = 0;
+        this.isAnimating = false;
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -315,6 +320,68 @@ export class PassiveTreeViewer {
         });
 
         this.topCanvas.style.cursor = 'grab';
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+    }
+
+    /**
+     * Handle keyboard shortcuts
+     */
+    handleKeyboard(e) {
+        // Ignore if typing in input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        const panSpeed = 50; // pixels
+
+        switch(e.key.toLowerCase()) {
+            case 'w':
+            case 'arrowup':
+                this.viewport.y += panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case 's':
+            case 'arrowdown':
+                this.viewport.y -= panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case 'a':
+            case 'arrowleft':
+                this.viewport.x += panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case 'd':
+            case 'arrowright':
+                this.viewport.x -= panSpeed;
+                this.markAllTilesDirty();
+                this.render();
+                e.preventDefault();
+                break;
+            case '+':
+            case '=':
+                this.zoomIn();
+                e.preventDefault();
+                break;
+            case '-':
+            case '_':
+                this.zoomOut();
+                e.preventDefault();
+                break;
+            case 'r':
+                this.centerView();
+                e.preventDefault();
+                break;
+            case 'escape':
+                this.resetTree();
+                e.preventDefault();
+                break;
+        }
     }
 
     /**
@@ -604,6 +671,38 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Start animation loop
+     */
+    startAnimation() {
+        if (this.isAnimating) return;
+
+        this.isAnimating = true;
+        this.animationTime = 0;
+
+        const animate = (timestamp) => {
+            if (!this.isAnimating) return;
+
+            this.animationTime = timestamp;
+            this.render();
+
+            this.animationFrame = requestAnimationFrame(animate);
+        };
+
+        this.animationFrame = requestAnimationFrame(animate);
+    }
+
+    /**
+     * Stop animation loop
+     */
+    stopAnimation() {
+        this.isAnimating = false;
+        if (this.animationFrame) {
+            cancelAnimationFrame(this.animationFrame);
+            this.animationFrame = null;
+        }
+    }
+
+    /**
      * Render main canvas (background + nodes + connections)
      */
     renderMainLayer() {
@@ -744,6 +843,7 @@ export class PassiveTreeViewer {
     /**
      * Render connections (arc for same orbit, straight for different)
      * Filters out connections to hidden ascendancy/bloodline nodes
+     * Highlights allocated paths
      */
     renderConnections(ctx) {
         if (!this.treeData?.links) return;
@@ -772,6 +872,7 @@ export class PassiveTreeViewer {
 
             const isAllocated = this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id);
             const isPartial = this.allocatedNodes.has(source.id) || this.allocatedNodes.has(target.id);
+            const isPath = isAllocated; // Both nodes allocated = path
 
             // Determine connection style
             if (source.orbit === target.orbit && source.group === target.group) {
@@ -825,21 +926,30 @@ export class PassiveTreeViewer {
         ctx.lineTo(target.x, target.y);
 
         if (isAllocated) {
-            ctx.strokeStyle = '#b89968';
-            ctx.lineWidth = 4;
-            ctx.globalAlpha = 0.9;
+            // Draw glow for allocated paths
+            ctx.save();
+            ctx.shadowColor = '#f59e0b';
+            ctx.shadowBlur = 6;
+            ctx.strokeStyle = '#d4af37'; // Brighter gold
+            ctx.lineWidth = 5;
+            ctx.globalAlpha = 1.0;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.restore();
         } else if (isPartial) {
             ctx.strokeStyle = '#7a6f5c';
             ctx.lineWidth = 3;
             ctx.globalAlpha = 0.6;
+            ctx.lineCap = 'round';
+            ctx.stroke();
         } else {
             ctx.strokeStyle = '#4a4a4a';
             ctx.lineWidth = 2;
             ctx.globalAlpha = 0.3;
+            ctx.lineCap = 'round';
+            ctx.stroke();
         }
 
-        ctx.lineCap = 'round';
-        ctx.stroke();
         ctx.globalAlpha = 1.0;
     }
 
@@ -1040,6 +1150,11 @@ export class PassiveTreeViewer {
 
                 // Restore context (remove clip)
                 ctx.restore();
+
+                // Draw mastery glow effect if allocated (animated)
+                if (node.type === 'mastery' && isAllocated) {
+                    this.renderMasteryGlow(ctx, node);
+                }
 
                 // Draw frame overlay (POE official frames)
                 this.renderNodeFrame(ctx, node, isAllocated, isHovered);
@@ -1243,6 +1358,77 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Render mastery glow effect (animated)
+     */
+    renderMasteryGlow(ctx, node) {
+        if (!this.sprites?.masteryActiveEffect) return;
+
+        try {
+            const zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+            const zoomKey = String(zoomLevels[this.options.spriteZoomLevel]);
+
+            const effectData = this.sprites.masteryActiveEffect[zoomKey];
+            if (!effectData || !node.icon) return;
+
+            const coords = effectData.coords?.[node.icon];
+            if (!coords) return;
+
+            // Extract filename
+            const cdnUrl = effectData.filename;
+            if (!cdnUrl) return;
+
+            const urlMatch = cdnUrl.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+            if (!urlMatch) return;
+
+            const localFileName = urlMatch[1];
+            const effectUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+            if (!this.spriteImages.has(effectUrl)) {
+                // Load effect sprite
+                this.loadImage(effectUrl).then(() => {
+                    // Start animation when effect loads
+                    if (!this.isAnimating) {
+                        this.startAnimation();
+                    }
+                }).catch(() => {});
+                return;
+            }
+
+            const effectImage = this.spriteImages.get(effectUrl);
+
+            // Calculate pulsing opacity (sine wave)
+            const pulseSpeed = 0.002; // Speed of pulse
+            const minOpacity = 0.3;
+            const maxOpacity = 0.8;
+            const opacity = minOpacity + (maxOpacity - minOpacity) *
+                           (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+            // Calculate scale
+            const nodeRadius = (this.nodeSizes.mastery || this.nodeSizes.normal) / 2;
+            const effectScale = (nodeRadius * 2.5) / Math.max(coords.w, coords.h); // Larger for glow
+
+            const w = coords.w * effectScale;
+            const h = coords.h * effectScale;
+
+            // Draw glow effect
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            ctx.globalCompositeOperation = 'lighter'; // Additive blending for glow
+
+            ctx.drawImage(
+                effectImage,
+                coords.x, coords.y, coords.w, coords.h,
+                node.x - w/2, node.y - h/2, w, h
+            );
+
+            ctx.restore();
+
+        } catch (error) {
+            // Silently fail
+        }
+    }
+
+    /**
      * Render node frame overlay (GGG official frames)
      */
     renderNodeFrame(ctx, node, isAllocated, isHovered) {
@@ -1391,17 +1577,51 @@ export class PassiveTreeViewer {
         this.midCtx.translate(this.viewport.x, this.viewport.y);
         this.midCtx.scale(this.viewport.scale, this.viewport.scale);
 
-        // Draw hover highlight
+        // Draw animated hover highlight
         const radius = (this.nodeSizes[this.hoveredNode.type] || this.nodeSizes.normal) / 2;
 
+        // Pulsing scale animation
+        const pulseSpeed = 0.003;
+        const minScale = 1.0;
+        const maxScale = 1.15;
+        const scale = minScale + (maxScale - minScale) *
+                     (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+        // Pulsing opacity
+        const minOpacity = 0.5;
+        const maxOpacity = 0.9;
+        const opacity = minOpacity + (maxOpacity - minOpacity) *
+                       (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+        // Draw outer glow
+        const glowRadius = (radius + 8) * scale;
+        const gradient = this.midCtx.createRadialGradient(
+            this.hoveredNode.x, this.hoveredNode.y, radius,
+            this.hoveredNode.x, this.hoveredNode.y, glowRadius
+        );
+        gradient.addColorStop(0, 'rgba(245, 158, 11, ' + (opacity * 0.8) + ')');
+        gradient.addColorStop(0.5, 'rgba(245, 158, 11, ' + (opacity * 0.4) + ')');
+        gradient.addColorStop(1, 'rgba(245, 158, 11, 0)');
+
         this.midCtx.beginPath();
-        this.midCtx.arc(this.hoveredNode.x, this.hoveredNode.y, radius + 5, 0, Math.PI * 2);
+        this.midCtx.arc(this.hoveredNode.x, this.hoveredNode.y, glowRadius, 0, Math.PI * 2);
+        this.midCtx.fillStyle = gradient;
+        this.midCtx.fill();
+
+        // Draw inner ring
+        this.midCtx.beginPath();
+        this.midCtx.arc(this.hoveredNode.x, this.hoveredNode.y, (radius + 3) * scale, 0, Math.PI * 2);
         this.midCtx.strokeStyle = '#f59e0b';
-        this.midCtx.lineWidth = 3;
-        this.midCtx.globalAlpha = 0.8;
+        this.midCtx.lineWidth = 2;
+        this.midCtx.globalAlpha = opacity;
         this.midCtx.stroke();
 
         this.midCtx.restore();
+
+        // Ensure animation continues for hover effect
+        if (!this.isAnimating) {
+            this.startAnimation();
+        }
     }
 
     /**
@@ -1494,13 +1714,60 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Update points display
+     * Update points display (accurate POE counting)
      */
     updatePointsDisplay() {
         const pointsEl = document.getElementById('points-used');
         if (pointsEl) {
-            pointsEl.textContent = this.allocatedNodes.size;
+            // Count only actual passive points (exclude class start, ascendancy class start, mastery)
+            let passivePoints = 0;
+
+            this.allocatedNodes.forEach(nodeId => {
+                const node = this.treeData.nodes.find(n => n.id === nodeId);
+                if (!node) return;
+
+                // Exclude these from point count (POE official rules)
+                if (node.type === 'classStart') return; // Class start is free
+                if (node.type === 'ascendancy') return; // Ascendancy points counted separately
+                if (node.type === 'mastery') return; // Masteries are free
+
+                passivePoints++;
+            });
+
+            pointsEl.textContent = passivePoints;
         }
+    }
+
+    /**
+     * Get allocated counts by type
+     */
+    getAllocatedCounts() {
+        const counts = {
+            normal: 0,
+            notable: 0,
+            keystone: 0,
+            jewel: 0,
+            mastery: 0,
+            ascendancy: 0,
+            total: 0
+        };
+
+        this.allocatedNodes.forEach(nodeId => {
+            const node = this.treeData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            const type = node.type;
+            if (counts.hasOwnProperty(type)) {
+                counts[type]++;
+            }
+
+            // Count towards total (excluding class start and masteries)
+            if (type !== 'classStart' && type !== 'mastery' && type !== 'ascendancy') {
+                counts.total++;
+            }
+        });
+
+        return counts;
     }
 
     /**
