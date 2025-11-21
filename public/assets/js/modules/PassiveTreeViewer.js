@@ -51,17 +51,52 @@ export class PassiveTreeViewer {
         this.zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
         this.currentZoomIndex = 0; // Start at 0.1246
 
-        // Character class selection
+        // Character class selection (POE official classes with ascendancy mapping)
         this.selectedClass = null;
         this.selectedAscendancy = null;
         this.characterClasses = [
-            { id: 'SCION', name: 'Scion', startNode: '26725' },
-            { id: 'MARAUDER', name: 'Marauder', startNode: '4' },
-            { id: 'RANGER', name: 'Ranger', startNode: '48679' },
-            { id: 'WITCH', name: 'Witch', startNode: '41529' },
-            { id: 'DUELIST', name: 'Duelist', startNode: '55549' },
-            { id: 'TEMPLAR', name: 'Templar', startNode: '36634' },
-            { id: 'SHADOW', name: 'Shadow', startNode: '26196' }
+            {
+                id: 'SCION',
+                name: 'Scion',
+                startNode: '26725',
+                ascendancies: ['Ascendant']
+            },
+            {
+                id: 'MARAUDER',
+                name: 'Marauder',
+                startNode: '4',
+                ascendancies: ['Juggernaut', 'Berserker', 'Chieftain']
+            },
+            {
+                id: 'RANGER',
+                name: 'Ranger',
+                startNode: '48679',
+                ascendancies: ['Raider', 'Deadeye', 'Pathfinder']
+            },
+            {
+                id: 'WITCH',
+                name: 'Witch',
+                startNode: '41529',
+                ascendancies: ['Occultist', 'Elementalist', 'Necromancer']
+            },
+            {
+                id: 'DUELIST',
+                name: 'Duelist',
+                startNode: '55549',
+                ascendancies: ['Slayer', 'Gladiator', 'Champion']
+            },
+            {
+                id: 'TEMPLAR',
+                name: 'Templar',
+                startNode: '36634',
+                ascendancies: ['Inquisitor', 'Hierophant', 'Guardian']
+            },
+            {
+                id: 'SHADOW',
+                name: 'Shadow',
+                startNode: '26196',
+                ascendancies: ['Assassin', 'Trickster', 'Saboteur']
+            }
         ];
 
         // Asset management
@@ -327,13 +362,28 @@ export class PassiveTreeViewer {
 
     /**
      * Find node at world coordinates (radius-based hit testing)
+     * Filters out hidden ascendancy/bloodline nodes (POE official behavior)
      */
     findNodeAt(worldX, worldY) {
         if (!this.treeData?.nodes) return null;
 
+        const allowedAscendancies = this.selectedClass?.ascendancies || [];
+
         // Check nodes in reverse order (top to bottom)
         for (let i = this.treeData.nodes.length - 1; i >= 0; i--) {
             const node = this.treeData.nodes[i];
+
+            // Filter ascendancy nodes
+            if (node.type === 'ascendancy') {
+                if (!this.selectedClass) continue; // Skip if no class selected
+                if (!allowedAscendancies.includes(node.ascendancyName)) continue;
+            }
+
+            // Filter bloodline nodes
+            if (node.type === 'bloodline' && !this.selectedClass) {
+                continue; // Skip if no class selected
+            }
+
             const radius = this.nodeSizes[node.type] || this.nodeSizes.normal;
 
             const dx = worldX - node.x;
@@ -349,7 +399,8 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Select character class
+     * Select character class (POE official behavior)
+     * Reveals class-specific ascendancy nodes and centers on starting node
      */
     selectClass(classId) {
         if (!classId) {
@@ -360,6 +411,19 @@ export class PassiveTreeViewer {
 
         const classData = this.characterClasses.find(c => c.id === classId);
         if (!classData) return;
+
+        // Clear old ascendancy/bloodline allocations when switching class
+        if (this.selectedClass && this.selectedClass.id !== classData.id) {
+            const oldAscendancies = this.selectedClass.ascendancies || [];
+            this.treeData?.nodes.forEach(node => {
+                if (node.type === 'ascendancy' && oldAscendancies.includes(node.ascendancyName)) {
+                    this.allocatedNodes.delete(node.id);
+                }
+                if (node.type === 'bloodline') {
+                    this.allocatedNodes.delete(node.id);
+                }
+            });
+        }
 
         this.selectedClass = classData;
 
@@ -378,7 +442,7 @@ export class PassiveTreeViewer {
             this.updatePointsDisplay();
         }
 
-        showToast(`Selected ${classData.name}`, 'success');
+        showToast(`Selected ${classData.name} - Ascendancy revealed`, 'success');
     }
 
     /**
@@ -554,17 +618,32 @@ export class PassiveTreeViewer {
 
     /**
      * Render connections (arc for same orbit, straight for different)
+     * Filters out connections to hidden ascendancy/bloodline nodes
      */
     renderConnections(ctx) {
         if (!this.treeData?.links) return;
 
         const nodeMap = new Map(this.treeData.nodes.map(n => [n.id, n]));
+        const allowedAscendancies = this.selectedClass?.ascendancies || [];
 
         this.treeData.links.forEach(link => {
             const source = nodeMap.get(link.source);
             const target = nodeMap.get(link.target);
 
             if (!source || !target) return;
+
+            // Filter connections to ascendancy nodes (POE official behavior)
+            if (source.type === 'ascendancy' || target.type === 'ascendancy') {
+                if (!this.selectedClass) return; // No class selected, skip ascendancy connections
+                const sourceAllowed = source.type !== 'ascendancy' || allowedAscendancies.includes(source.ascendancyName);
+                const targetAllowed = target.type !== 'ascendancy' || allowedAscendancies.includes(target.ascendancyName);
+                if (!sourceAllowed || !targetAllowed) return;
+            }
+
+            // Filter connections to bloodline nodes
+            if (source.type === 'bloodline' || target.type === 'bloodline') {
+                if (!this.selectedClass) return; // No class selected, skip bloodline connections
+            }
 
             const isAllocated = this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id);
             const isPartial = this.allocatedNodes.has(source.id) || this.allocatedNodes.has(target.id);
@@ -641,16 +720,35 @@ export class PassiveTreeViewer {
 
     /**
      * Render nodes with Canvas
+     * Only renders ascendancy nodes for selected class (POE official behavior)
      */
     renderNodes(ctx) {
         if (!this.treeData?.nodes) return;
+
+        // Get allowed ascendancy names for current class
+        const allowedAscendancies = this.selectedClass?.ascendancies || [];
 
         // Render in layers: normal -> notable -> keystone -> ascendancy -> bloodline -> class start
         const layers = ['normal', 'notable', 'mastery', 'jewel', 'keystone', 'ascendancy', 'bloodline', 'classStart'];
 
         layers.forEach(type => {
             this.treeData.nodes
-                .filter(n => n.type === type)
+                .filter(n => {
+                    if (n.type !== type) return false;
+
+                    // Filter ascendancy nodes: only show if class is selected and matches
+                    if (n.type === 'ascendancy') {
+                        if (!this.selectedClass) return false; // No class selected, hide all ascendancies
+                        return allowedAscendancies.includes(n.ascendancyName);
+                    }
+
+                    // Filter bloodline nodes: only show if class is selected
+                    if (n.type === 'bloodline') {
+                        return this.selectedClass !== null;
+                    }
+
+                    return true;
+                })
                 .forEach(node => this.renderNode(ctx, node));
         });
     }
@@ -882,16 +980,17 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Reset tree
+     * Reset tree (POE official behavior)
+     * Clears allocations and class selection, hides ascendancy nodes
      */
     resetTree() {
         this.allocatedNodes.clear();
         this.selectedClass = null;
+        this.selectedAscendancy = null;
         document.getElementById('class-select').value = '';
         this.updatePointsDisplay();
-        this.markAllTilesDirty();
-        this.render();
-        showToast('Tree reset', 'success');
+        this.centerView(); // Reset view position too
+        showToast('Tree reset - Class and ascendancy cleared', 'success');
     }
 
     /**
