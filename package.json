@@ -1,0 +1,20 @@
+{
+  "name": "exile-architect",
+  "version": "1.0.0",
+  "description": "Advanced Path of Exile Build Planner with AI Integration",
+  "scripts": {
+    "build:css": "tailwindcss -i ./public/assets/css/style.css -o ./public/assets/css/style.min.css --minify",
+    "watch:css": "tailwindcss -i ./public/assets/css/style.css -o ./public/assets/css/style.min.css --watch",
+    "build:js": "node build/minify-js.js",
+    "build": "npm run build:css && npm run build:js",
+    "watch": "npm run watch:css",
+    "production": "NODE_ENV=production npm run build"
+  },
+  "keywords": ["path-of-exile", "build-planner", "poe", "ai"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "tailwindcss": "^3.3.0",
+    "terser": "^5.24.0"
+  }
+}
