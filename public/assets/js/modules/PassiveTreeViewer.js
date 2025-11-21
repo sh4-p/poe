@@ -41,15 +41,15 @@ export class PassiveTreeViewer {
         this.viewport = {
             x: 0,
             y: 0,
-            scale: 0.15, // Start zoomed out like POE
+            scale: 0.1246, // Start at lowest zoom (POE official)
             isDragging: false,
             dragStartX: 0,
             dragStartY: 0
         };
 
-        // Zoom levels (5 predefined levels like POE)
-        this.zoomLevels = [0.1, 0.15, 0.3, 0.6, 1.0];
-        this.currentZoomIndex = 1; // Start at 0.15
+        // Zoom levels (4 predefined levels - POE official)
+        this.zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+        this.currentZoomIndex = 0; // Start at 0.1246
 
         // Character class selection
         this.selectedClass = null;
@@ -80,7 +80,9 @@ export class PassiveTreeViewer {
             keystone: 109,
             mastery: 90,
             classStart: 200,
-            jewel: 70
+            jewel: 70,
+            bloodline: 70,
+            ascendancy: 70
         };
 
         // Clickable areas for hit testing
@@ -429,7 +431,8 @@ export class PassiveTreeViewer {
 
         const constants = officialData.constants || {
             orbitRadii: [0, 82, 162, 335, 493, 662, 846],
-            skillsPerOrbit: [1, 6, 16, 16, 40, 72, 72]
+            skillsPerOrbit: [1, 6, 16, 16, 40, 72, 72],
+            PSSCentreInnerRadius: 130
         };
 
         // Process nodes
@@ -464,7 +467,16 @@ export class PassiveTreeViewer {
                     orbit: nodeData.orbit,
                     orbitIndex: nodeData.orbitIndex,
                     ascendancyName: nodeData.ascendancyName,
-                    classStartIndex: nodeData.classStartIndex
+                    classStartIndex: nodeData.classStartIndex,
+                    // POE official additional properties
+                    isKeystone: nodeData.isKeystone || false,
+                    isNotable: nodeData.isNotable || false,
+                    isJewelSocket: nodeData.isJewelSocket || false,
+                    isMastery: nodeData.isMastery || false,
+                    isBloodline: nodeData.isBloodline || false,
+                    isMultipleChoiceOption: nodeData.isMultipleChoiceOption || false,
+                    reminderText: nodeData.reminderText,
+                    flavourText: nodeData.flavourText
                 };
 
                 nodes.push(node);
@@ -490,14 +502,17 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Detect node type
+     * Detect node type (POE official flags)
      */
     detectNodeType(nodeData) {
         if (nodeData.isKeystone) return 'keystone';
         if (nodeData.isMastery) return 'mastery';
         if (nodeData.isJewelSocket) return 'jewel';
         if (nodeData.isNotable) return 'notable';
+        if (nodeData.isBloodline) return 'bloodline';
+        if (nodeData.ascendancyName) return 'ascendancy';
         if (nodeData.classStartIndex !== undefined) return 'classStart';
+        if (nodeData.spc && nodeData.spc.length > 0) return 'classStart'; // Alternative class start detection
         return 'normal';
     }
 
@@ -630,8 +645,8 @@ export class PassiveTreeViewer {
     renderNodes(ctx) {
         if (!this.treeData?.nodes) return;
 
-        // Render in layers: normal -> notable -> keystone -> class start
-        const layers = ['normal', 'notable', 'mastery', 'jewel', 'keystone', 'classStart'];
+        // Render in layers: normal -> notable -> keystone -> ascendancy -> bloodline -> class start
+        const layers = ['normal', 'notable', 'mastery', 'jewel', 'keystone', 'ascendancy', 'bloodline', 'classStart'];
 
         layers.forEach(type => {
             this.treeData.nodes
@@ -689,16 +704,18 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Get node color by type
+     * Get node color by type (POE official colors)
      */
     getNodeColor(node) {
         switch (node.type) {
-            case 'classStart': return '#3b82f6';
-            case 'keystone': return '#8b5cf6';
-            case 'mastery': return '#7c3aed';
-            case 'jewel': return '#14b8a6';
-            case 'notable': return '#10b981';
-            default: return '#6b7280';
+            case 'classStart': return '#3b82f6'; // Blue
+            case 'keystone': return '#8b5cf6'; // Purple
+            case 'mastery': return '#7c3aed'; // Deep purple
+            case 'jewel': return '#14b8a6'; // Teal
+            case 'notable': return '#10b981'; // Green
+            case 'bloodline': return '#ef4444'; // Red
+            case 'ascendancy': return '#f97316'; // Orange
+            default: return '#6b7280'; // Gray
         }
     }
 
@@ -858,8 +875,8 @@ export class PassiveTreeViewer {
     centerView() {
         this.viewport.x = this.options.width / 2;
         this.viewport.y = this.options.height / 2;
-        this.viewport.scale = 0.15;
-        this.currentZoomIndex = 1;
+        this.viewport.scale = 0.1246; // POE official starting zoom
+        this.currentZoomIndex = 0;
         this.markAllTilesDirty();
         this.render();
     }
