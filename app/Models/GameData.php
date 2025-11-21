@@ -318,6 +318,74 @@ class GameData extends BaseModel
     }
 
     /**
+     * Save passive tree data to database
+     */
+    public function savePassiveTree(string $version, array $treeData): bool
+    {
+        try {
+            $nodeCount = isset($treeData['nodes']) ? count($treeData['nodes']) : 0;
+            $jsonData = json_encode($treeData, JSON_UNESCAPED_UNICODE);
+
+            // Check if version already exists
+            $existing = $this->db->query(
+                "SELECT id FROM passive_tree WHERE poe_version = ? LIMIT 1",
+                [$version]
+            )->fetch(\PDO::FETCH_ASSOC);
+
+            if ($existing) {
+                // Update existing
+                return $this->db->update(
+                    'passive_tree',
+                    [
+                        'tree_data' => $jsonData,
+                        'node_count' => $nodeCount,
+                    ],
+                    'poe_version = ?',
+                    [$version]
+                );
+            } else {
+                // Insert new
+                return $this->db->insert('passive_tree', [
+                    'poe_version' => $version,
+                    'tree_data' => $jsonData,
+                    'node_count' => $nodeCount,
+                ]) > 0;
+            }
+        } catch (\Exception $e) {
+            error_log("Failed to save passive tree: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get passive tree from database
+     */
+    public function getPassiveTreeFromDB(string $version = 'latest'): ?array
+    {
+        try {
+            if ($version === 'latest') {
+                $result = $this->db->query(
+                    "SELECT tree_data FROM passive_tree ORDER BY created_at DESC LIMIT 1"
+                )->fetch(\PDO::FETCH_ASSOC);
+            } else {
+                $result = $this->db->query(
+                    "SELECT tree_data FROM passive_tree WHERE poe_version = ? LIMIT 1",
+                    [$version]
+                )->fetch(\PDO::FETCH_ASSOC);
+            }
+
+            if ($result && isset($result['tree_data'])) {
+                return json_decode($result['tree_data'], true);
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            error_log("Failed to get passive tree from DB: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Clear old data by version
      */
     public function clearOldData(string $table, string $version): bool
