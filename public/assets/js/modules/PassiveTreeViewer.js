@@ -797,7 +797,9 @@ export class PassiveTreeViewer {
                     isBloodline: nodeData.isBloodline || false,
                     isMultipleChoiceOption: nodeData.isMultipleChoiceOption || false,
                     reminderText: nodeData.reminderText,
-                    flavourText: nodeData.flavourText
+                    flavourText: nodeData.flavourText,
+                    // Mastery effects
+                    masteryEffects: nodeData.masteryEffects || []
                 };
 
                 nodes.push(node);
@@ -2121,8 +2123,17 @@ export class PassiveTreeViewer {
         } else {
             // Allocate node
 
+            // Debug mastery detection
+            console.log('Toggle node:', {
+                name: node.name,
+                isMastery: node.isMastery,
+                type: node.type,
+                masteryEffects: node.masteryEffects
+            });
+
             // If it's a mastery, show effect selection modal
             if ((node.isMastery || node.type === 'mastery') && node.masteryEffects && node.masteryEffects.length > 0) {
+                console.log('Opening mastery modal for:', node.name);
                 this.showMasteryEffectModal(node);
                 return; // Don't allocate yet, wait for user to select effect
             }
