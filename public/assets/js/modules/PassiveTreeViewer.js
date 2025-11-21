@@ -103,6 +103,7 @@ export class PassiveTreeViewer {
         this.sprites = null;
         this.spriteImages = new Map();
         this.loadingPromises = new Map();
+        this.spritesLoaded = false;
 
         // Tile grid for optimization
         this.tiles = new Map();
@@ -476,6 +477,7 @@ export class PassiveTreeViewer {
             if (this.rawTreeData.sprites) {
                 this.sprites = this.rawTreeData.sprites;
                 console.log(`✅ Loaded ${Object.keys(this.sprites).length} sprite sheet definitions`);
+                console.log('Available sprite sheets:', Object.keys(this.sprites).slice(0, 10).join(', '));
             }
 
             // Transform GGG format to our format
@@ -760,42 +762,48 @@ export class PassiveTreeViewer {
 
                     return true;
                 })
-                .forEach(node => this.renderNode(ctx, node));
+                .forEach(node => {
+                    // Render synchronously - sprite loading happens in background
+                    this.renderNode(ctx, node);
+                });
         });
     }
 
     /**
-     * Render individual node
+     * Render individual node with sprite images (GGG official sprites)
      */
     renderNode(ctx, node) {
         const isAllocated = this.allocatedNodes.has(node.id);
         const isHovered = this.hoveredNode?.id === node.id;
         const radius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
 
-        // Draw node circle
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        // Try to render sprite if available
+        const spriteRendered = this.renderNodeSprite(ctx, node, isAllocated, isHovered);
 
-        if (isAllocated) {
-            ctx.fillStyle = this.getNodeColor(node);
-            ctx.fill();
+        // Render circle only if sprite not rendered
+        if (!spriteRendered) {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
 
-            // Glow effect
-            ctx.strokeStyle = '#f59e0b';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        } else if (isHovered) {
-            ctx.fillStyle = '#3a3a3a';
-            ctx.fill();
-            ctx.strokeStyle = '#888';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        } else {
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fill();
-            ctx.strokeStyle = this.getNodeColor(node);
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            if (isAllocated) {
+                ctx.fillStyle = this.getNodeColor(node);
+                ctx.fill();
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            } else if (isHovered) {
+                ctx.fillStyle = '#3a3a3a';
+                ctx.fill();
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            } else {
+                ctx.fillStyle = '#1a1a1a';
+                ctx.fill();
+                ctx.strokeStyle = this.getNodeColor(node);
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
         }
 
         // Draw node label for keystones
@@ -810,6 +818,146 @@ export class PassiveTreeViewer {
             ctx.fillText(node.name || '', node.x, node.y + radius + 5);
             ctx.restore();
         }
+    }
+
+    /**
+     * Render node sprite from sprite sheet (GGG official)
+     * Returns true if sprite was rendered, false if fallback needed
+     */
+    renderNodeSprite(ctx, node, isAllocated, isHovered) {
+        if (!node.icon || !this.sprites) return false;
+
+        try {
+            // Determine sprite sheet based on node type and state
+            let spriteSheetName = 'normalActive';
+
+            // Map node types to correct sprite sheets (GGG official naming)
+            if (node.type === 'keystone') {
+                spriteSheetName = isAllocated ? 'keystoneActive' : 'keystoneInactive';
+            } else if (node.type === 'notable') {
+                spriteSheetName = isAllocated ? 'notableActive' : 'notableInactive';
+            } else if (node.type === 'normal') {
+                spriteSheetName = isAllocated ? 'normalActive' : 'normalInactive';
+            } else if (node.type === 'mastery') {
+                spriteSheetName = isAllocated ? 'masteryActiveSelected' : 'mastery';
+            } else if (node.type === 'jewel') {
+                // Jewels use different sprite handling (TODO)
+                return false;
+            } else if (node.type === 'classStart') {
+                // Class start nodes are special (TODO)
+                return false;
+            }
+
+            // Get sprite sheet metadata - zoom keys are STRINGS
+            const zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+            const zoomKey = String(zoomLevels[this.options.spriteZoomLevel]); // Convert to string!
+
+            const spriteSheet = this.sprites[spriteSheetName];
+            if (!spriteSheet) {
+                if (!this._warnedSheets) this._warnedSheets = new Set();
+                if (!this._warnedSheets.has(spriteSheetName)) {
+                    console.warn(`❌ Sprite sheet not found: ${spriteSheetName}`);
+                    this._warnedSheets.add(spriteSheetName);
+                }
+                return false;
+            }
+
+            const zoomData = spriteSheet[zoomKey];
+            if (!zoomData) {
+                console.warn(`❌ Zoom level ${zoomKey} not found in ${spriteSheetName}`);
+                return false;
+            }
+
+            const coords = zoomData.coords?.[node.icon];
+            if (!coords) return false;
+
+            // Get the filename from metadata (extract from CDN URL)
+            const cdnUrl = zoomData.filename;
+            if (!cdnUrl) {
+                console.warn(`❌ No filename in sprite metadata for ${spriteSheetName}`);
+                return false;
+            }
+
+            // Extract filename from CDN URL (e.g., "skills-2.jpg" from "https://web.poecdn.com/.../skills-2.jpg?hash")
+            const urlMatch = cdnUrl.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+            if (!urlMatch) {
+                console.warn(`❌ Could not extract filename from URL: ${cdnUrl}`);
+                return false;
+            }
+            const localFileName = urlMatch[1];
+            const spriteUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+            // Check if image is already loaded
+            if (this.spriteImages.has(spriteUrl)) {
+                const image = this.spriteImages.get(spriteUrl);
+
+                // Calculate scale to match node size
+                const nodeRadius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
+                const spriteScale = (nodeRadius * 2) / Math.max(coords.w, coords.h);
+
+                const w = coords.w * spriteScale;
+                const h = coords.h * spriteScale;
+
+                ctx.drawImage(
+                    image,
+                    coords.x, coords.y, coords.w, coords.h, // Source rectangle
+                    node.x - w/2, node.y - h/2, w, h         // Destination rectangle
+                );
+
+                return true; // Sprite rendered successfully
+
+            } else {
+                // Start loading the image
+                this.loadImage(spriteUrl).then(() => {
+                    // Trigger re-render when first sprite loads
+                    if (!this.spritesLoaded) {
+                        this.spritesLoaded = true;
+                        console.log('✅ First sprite loaded, re-rendering tree');
+                        requestAnimationFrame(() => this.render());
+                    }
+                }).catch((error) => {
+                    console.error(`❌ Failed to load sprite: ${spriteUrl}`, error);
+                });
+
+                return false; // Sprite not yet loaded, use fallback
+            }
+
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * Load image (with caching)
+     */
+    async loadImage(url) {
+        // Check cache
+        if (this.spriteImages.has(url)) {
+            return this.spriteImages.get(url);
+        }
+
+        // Check if already loading
+        if (this.loadingPromises.has(url)) {
+            return this.loadingPromises.get(url);
+        }
+
+        // Create loading promise
+        const promise = new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                this.spriteImages.set(url, img);
+                this.loadingPromises.delete(url);
+                resolve(img);
+            };
+            img.onerror = () => {
+                this.loadingPromises.delete(url);
+                reject(new Error(`Failed to load: ${url}`));
+            };
+            img.src = url;
+        });
+
+        this.loadingPromises.set(url, promise);
+        return promise;
     }
 
     /**
