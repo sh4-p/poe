@@ -36,30 +36,62 @@ class DataScraperService
     }
 
     /**
-     * Scrape passive tree from official source
+     * Scrape passive tree from official POE sources
      */
     public function scrapePassiveTree(string $version = 'latest'): bool
     {
-        echo "📊 Scraping passive tree data...\n";
+        echo "📊 Scraping passive tree data from official POE sources...\n";
 
         try {
-            // Try official GitHub repo first (most reliable)
-            $urls = [
-                "https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding/master/src/Data/3_0/PassiveSkillTree.json",
-                "https://www.pathofexile.com/passive-skill-tree/data.json"
+            // POE API endpoints (in order of preference)
+            $sources = [
+                // 1. Official Grinding Gear Games skilltree-export (MOST RELIABLE - Official)
+                [
+                    'url' => 'https://raw.githubusercontent.com/grindinggear/skilltree-export/master/data.json',
+                    'name' => 'GGG Official Skill Tree Export'
+                ],
+                // 2. Path of Building Community (community-maintained, frequently updated)
+                [
+                    'url' => 'https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding/master/src/Data/3_0/PassiveSkillTree.json',
+                    'name' => 'PoB Community GitHub'
+                ],
+                // 3. POE Tool Dev (alternative source)
+                [
+                    'url' => 'https://raw.githubusercontent.com/poe-tool-dev/passive-skill-tree-json/master/data.json',
+                    'name' => 'POE Tool Dev'
+                ]
             ];
 
             $treeData = null;
-            foreach ($urls as $url) {
+            $successSource = null;
+
+            foreach ($sources as $source) {
                 try {
-                    echo "  Trying: {$url}\n";
-                    $response = $this->httpClient->get($url);
+                    echo "  Trying: {$source['name']}...\n";
+
+                    $response = $this->httpClient->get($source['url'], [
+                        'headers' => [
+                            'User-Agent' => $this->config['user_agent'],
+                            'Accept' => 'application/json',
+                        ],
+                        'timeout' => 30
+                    ]);
+
                     $treeData = $response->getBody()->getContents();
 
                     // Validate JSON
                     $decoded = json_decode($treeData, true);
-                    if (json_last_error() === JSON_ERROR_NONE && isset($decoded['nodes'])) {
-                        echo "  ✓ Successfully retrieved tree data\n";
+                    if (json_last_error() === JSON_ERROR_NONE &&
+                        (isset($decoded['nodes']) || isset($decoded['tree']))) {
+                        echo "  ✓ Successfully retrieved from {$source['name']}\n";
+                        $successSource = $source['name'];
+
+                        // Normalize structure if needed
+                        if (isset($decoded['tree']) && !isset($decoded['nodes'])) {
+                            $decoded['nodes'] = $decoded['tree'];
+                        }
+
+                        $treeData = json_encode($decoded);
                         break;
                     }
                 } catch (\Exception $e) {
@@ -83,12 +115,23 @@ class DataScraperService
             file_put_contents($filename, $treeData);
 
             $decoded = json_decode($treeData, true);
-            echo "✓ Passive tree saved to: {$filename}\n";
-            echo "  Nodes: " . count($decoded['nodes'] ?? []) . "\n";
+            $nodeCount = count($decoded['nodes'] ?? []);
 
-            // Also save to database
-            $this->gameDataModel->savePassiveTree($version, $decoded);
-            echo "  ✓ Saved to database\n";
+            echo "✓ Passive tree saved to: {$filename}\n";
+            echo "  Source: {$successSource}\n";
+            echo "  Nodes: {$nodeCount}\n";
+
+            // Save to database
+            try {
+                $saved = $this->gameDataModel->savePassiveTree($version, $decoded);
+                if ($saved) {
+                    echo "  ✓ Saved to database\n";
+                } else {
+                    echo "  ⚠ Database save failed (file still available)\n";
+                }
+            } catch (\Exception $e) {
+                echo "  ⚠ Database save error: " . $e->getMessage() . "\n";
+            }
 
             return true;
 
@@ -97,6 +140,7 @@ class DataScraperService
             error_log("Passive tree scraping error: " . $e->getMessage());
 
             // Create minimal sample tree if all else fails
+            echo "  → Creating sample passive tree for development...\n";
             $this->createSamplePassiveTree($version);
             return false;
         }

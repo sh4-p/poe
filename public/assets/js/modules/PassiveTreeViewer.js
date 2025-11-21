@@ -193,30 +193,152 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Load tree data
+     * Load tree data from POE official sources
      */
     async loadTree(version = 'latest') {
         try {
-            // Try to load from API first
+            showToast('Loading passive tree...', 'info', 1000);
+
+            // Try to load from API first (will fetch from official POE sources)
             const response = await fetch('/api/passive-tree?version=' + version);
 
             if (response.ok) {
-                this.treeData = await response.json();
+                const apiData = await response.json();
+
+                if (apiData.success && apiData.tree) {
+                    // Transform official POE data format to our format
+                    this.treeData = this.transformOfficialTreeData(apiData.tree);
+                    console.log(`Loaded ${apiData.nodeCount} nodes from official POE data`);
+                    showToast(`Passive tree loaded (${apiData.nodeCount} nodes)`, 'success');
+                } else {
+                    throw new Error('Invalid API response');
+                }
             } else {
-                // Use sample data if API fails
-                this.treeData = this.getSampleTreeData();
+                throw new Error('API request failed');
             }
 
             this.renderTree();
-            showToast('Passive tree loaded', 'success');
 
         } catch (error) {
-            console.error('Failed to load tree data:', error);
-            // Fallback to sample data
+            console.error('Failed to load tree data from API:', error);
+
+            // Fallback to sample data for development
+            console.warn('Using sample passive tree data');
             this.treeData = this.getSampleTreeData();
             this.renderTree();
-            showToast('Using sample passive tree', 'info');
+            showToast('Using sample tree (API unavailable)', 'info');
         }
+    }
+
+    /**
+     * Transform official POE tree data to our viewer format
+     */
+    transformOfficialTreeData(officialData) {
+        // Official GGG skilltree-export format uses groups + orbits for positioning
+        // Nodes reference their group and orbit position
+
+        const nodes = [];
+        const links = [];
+
+        // Extract constants for calculations
+        const constants = officialData.constants || {
+            orbitRadii: [0, 82, 162, 335, 493, 662, 846],
+            skillsPerOrbit: [1, 6, 16, 16, 40, 72, 72]
+        };
+
+        // Process nodes from official data
+        if (officialData.nodes && officialData.groups) {
+            for (const [nodeId, nodeData] of Object.entries(officialData.nodes)) {
+                // Calculate actual position from group + orbit system
+                const group = officialData.groups[nodeData.group];
+                let x = 0, y = 0;
+
+                if (group) {
+                    // Start with group position
+                    x = group.x || 0;
+                    y = group.y || 0;
+
+                    // Add orbit offset if not center node
+                    if (nodeData.orbit > 0 && nodeData.orbit < constants.orbitRadii.length) {
+                        const orbitRadius = constants.orbitRadii[nodeData.orbit];
+                        const skillsInOrbit = constants.skillsPerOrbit[nodeData.orbit];
+                        const angle = (2 * Math.PI * nodeData.orbitIndex) / skillsInOrbit;
+
+                        x += orbitRadius * Math.sin(angle);
+                        y += -orbitRadius * Math.cos(angle); // Negative because Y grows downward
+                    }
+                }
+
+                // Transform node data
+                const node = {
+                    id: nodeId,
+                    name: nodeData.name || `Node ${nodeId}`,
+                    type: this.detectNodeType(nodeData),
+                    stats: nodeData.stats || [],
+                    x: x,
+                    y: y,
+                    icon: nodeData.icon,
+                    group: nodeData.group,
+                    orbit: nodeData.orbit,
+                    orbitIndex: nodeData.orbitIndex,
+                    // Additional properties for special node types
+                    ascendancyName: nodeData.ascendancyName,
+                    reminderText: nodeData.reminderText,
+                    flavourText: nodeData.flavourText
+                };
+
+                // Add mastery-specific data
+                if (nodeData.isMastery) {
+                    node.masteryEffects = nodeData.masteryEffects;
+                    node.inactiveIcon = nodeData.inactiveIcon;
+                    node.activeIcon = nodeData.activeIcon;
+                }
+
+                // Add jewel socket-specific data
+                if (nodeData.isJewelSocket) {
+                    node.expansionJewel = nodeData.expansionJewel;
+                }
+
+                nodes.push(node);
+            }
+        }
+
+        // Process connections/links from 'out' property
+        if (officialData.nodes) {
+            for (const [nodeId, nodeData] of Object.entries(officialData.nodes)) {
+                if (nodeData.out && Array.isArray(nodeData.out)) {
+                    nodeData.out.forEach(targetId => {
+                        links.push({
+                            source: nodeId,
+                            target: String(targetId)
+                        });
+                    });
+                }
+            }
+        }
+
+        console.log(`Transformed ${nodes.length} nodes and ${links.length} connections from official POE data`);
+        return { nodes, links };
+    }
+
+    /**
+     * Detect node type from official data
+     */
+    detectNodeType(nodeData) {
+        // Determine node type based on official GGG data flags
+        // Check in order of specificity
+        if (nodeData.isKeystone) return 'keystone';
+        if (nodeData.isMastery) return 'mastery';
+        if (nodeData.isJewelSocket) return 'jewel';
+        if (nodeData.isNotable) return 'notable';
+        if (nodeData.isBloodline) return 'bloodline';
+        if (nodeData.ascendancyName) return 'ascendancy';
+        if (nodeData.classStartIndex !== undefined) return 'classStart';
+
+        // Check for root node (center of tree)
+        if (nodeData.orbit === 0 && nodeData.group === 0) return 'root';
+
+        return 'normal';
     }
 
     /**
@@ -442,26 +564,36 @@ export class PassiveTreeViewer {
      */
     getNodeRadius(node) {
         switch (node.type) {
-            case 'start': return this.options.startingNodeRadius;
+            case 'root': return 16;
+            case 'classStart': return this.options.startingNodeRadius;
             case 'keystone': return this.options.keystoneRadius;
+            case 'mastery': return 12;
+            case 'jewel': return 12;
             case 'notable': return this.options.notableRadius;
+            case 'ascendancy': return this.options.notableRadius;
+            case 'bloodline': return this.options.notableRadius;
             default: return this.options.nodeRadius;
         }
     }
 
     /**
-     * Get node color
+     * Get node color based on official POE colors
      */
     getNodeColor(node) {
         if (this.allocatedNodes.has(node.id)) {
-            return '#f59e0b'; // Yellow for allocated
+            return '#f59e0b'; // Yellow/gold for allocated
         }
 
         switch (node.type) {
-            case 'start': return '#3b82f6'; // Blue
-            case 'keystone': return '#8b5cf6'; // Purple
-            case 'notable': return '#10b981'; // Green
-            default: return '#6b7280'; // Gray
+            case 'root': return '#ffffff'; // White for center
+            case 'classStart': return '#3b82f6'; // Blue for class starts
+            case 'keystone': return '#8b5cf6'; // Purple for keystones
+            case 'mastery': return '#7c3aed'; // Deep purple for masteries
+            case 'jewel': return '#14b8a6'; // Teal for jewel sockets
+            case 'notable': return '#10b981'; // Green for notables
+            case 'ascendancy': return '#ef4444'; // Red for ascendancy nodes
+            case 'bloodline': return '#f97316'; // Orange for bloodline
+            default: return '#6b7280'; // Gray for normal nodes
         }
     }
 
