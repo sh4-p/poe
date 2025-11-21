@@ -347,6 +347,45 @@ class ApiController extends BaseController
     }
 
     /**
+     * Get passive skill tree data
+     */
+    public function passiveTree(): Response
+    {
+        $version = $this->request->query('version', 'latest');
+
+        try {
+            // Try database first
+            $treeData = $this->gameDataModel->getPassiveTreeFromDB($version);
+
+            // Fallback to file if database doesn't have it
+            if (!$treeData) {
+                $treeData = $this->gameDataModel->getPassiveTreeData($version);
+            }
+
+            if ($treeData) {
+                return $this->json([
+                    'success' => true,
+                    'version' => $version,
+                    'tree' => $treeData,
+                    'nodeCount' => count($treeData['nodes'] ?? [])
+                ]);
+            }
+
+            return $this->json([
+                'success' => false,
+                'error' => 'Passive tree data not found for version: ' . $version
+            ], 404);
+
+        } catch (\Exception $e) {
+            error_log("Passive tree API error: " . $e->getMessage());
+            return $this->json([
+                'success' => false,
+                'error' => 'Failed to load passive tree data'
+            ], 500);
+        }
+    }
+
+    /**
      * Health check endpoint
      */
     public function health(): Response

@@ -58,7 +58,7 @@ $router->get('/api/items', 'ApiController@getItems');
 $router->get('/api/items/{id}', 'ApiController@getItemDetails');
 
 // Passive tree
-$router->get('/api/passive-tree', 'ApiController@getPassiveTree');
+$router->get('/api/passive-tree', 'ApiController@passiveTree');
 
 // Skill gems
 $router->get('/api/skill-gems', 'ApiController@getSkillGems');

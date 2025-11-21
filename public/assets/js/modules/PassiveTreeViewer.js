@@ -193,30 +193,101 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Load tree data
+     * Load tree data from POE official sources
      */
     async loadTree(version = 'latest') {
         try {
-            // Try to load from API first
+            showToast('Loading passive tree...', 'info', 1000);
+
+            // Try to load from API first (will fetch from official POE sources)
             const response = await fetch('/api/passive-tree?version=' + version);
 
             if (response.ok) {
-                this.treeData = await response.json();
+                const apiData = await response.json();
+
+                if (apiData.success && apiData.tree) {
+                    // Transform official POE data format to our format
+                    this.treeData = this.transformOfficialTreeData(apiData.tree);
+                    console.log(`Loaded ${apiData.nodeCount} nodes from official POE data`);
+                    showToast(`Passive tree loaded (${apiData.nodeCount} nodes)`, 'success');
+                } else {
+                    throw new Error('Invalid API response');
+                }
             } else {
-                // Use sample data if API fails
-                this.treeData = this.getSampleTreeData();
+                throw new Error('API request failed');
             }
 
             this.renderTree();
-            showToast('Passive tree loaded', 'success');
 
         } catch (error) {
-            console.error('Failed to load tree data:', error);
-            // Fallback to sample data
+            console.error('Failed to load tree data from API:', error);
+
+            // Fallback to sample data for development
+            console.warn('Using sample passive tree data');
             this.treeData = this.getSampleTreeData();
             this.renderTree();
-            showToast('Using sample passive tree', 'info');
+            showToast('Using sample tree (API unavailable)', 'info');
         }
+    }
+
+    /**
+     * Transform official POE tree data to our viewer format
+     */
+    transformOfficialTreeData(officialData) {
+        // Official POE data has a different structure
+        // Transform it to our expected format
+
+        const nodes = [];
+        const links = [];
+
+        // Process nodes from official data
+        if (officialData.nodes) {
+            for (const [nodeId, nodeData] of Object.entries(officialData.nodes)) {
+                // Transform node data
+                const node = {
+                    id: nodeId,
+                    name: nodeData.name || nodeData.dn || `Node ${nodeId}`,
+                    type: this.detectNodeType(nodeData),
+                    stats: nodeData.sd || nodeData.stats || [],
+                    x: nodeData.x || 0,
+                    y: nodeData.y || 0,
+                    orbit: nodeData.orbit || nodeData.o || 0,
+                    orbitIndex: nodeData.orbitIndex || nodeData.oidx || 0
+                };
+
+                nodes.push(node);
+            }
+        }
+
+        // Process connections/links
+        if (officialData.nodes) {
+            for (const [nodeId, nodeData] of Object.entries(officialData.nodes)) {
+                if (nodeData.out || nodeData.o) {
+                    const connections = nodeData.out || nodeData.o || [];
+                    connections.forEach(targetId => {
+                        links.push({
+                            source: nodeId,
+                            target: String(targetId)
+                        });
+                    });
+                }
+            }
+        }
+
+        return { nodes, links };
+    }
+
+    /**
+     * Detect node type from official data
+     */
+    detectNodeType(nodeData) {
+        // Determine node type based on official data flags
+        if (nodeData.isNotable || nodeData.not) return 'notable';
+        if (nodeData.isKeystone || nodeData.ks) return 'keystone';
+        if (nodeData.isMastery || nodeData.m) return 'mastery';
+        if (nodeData.isJewelSocket || nodeData.isSocket) return 'jewel';
+        if (nodeData.ascendancyName || nodeData.spc) return 'ascendancy';
+        return 'normal';
     }
 
     /**
