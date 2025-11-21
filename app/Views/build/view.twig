@@ -108,15 +108,7 @@
                 <div class="lg:col-span-3">
                     <div class="bg-gray-800 rounded-lg border border-gray-700 p-6">
                         <h2 class="text-lg font-bold text-yellow-500 mb-4">Passive Skill Tree</h2>
-                        <div class="bg-gray-900 rounded-lg border border-gray-700 h-[700px] flex items-center justify-center">
-                            <div class="text-center text-gray-500">
-                                <svg class="w-20 h-20 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
-                                </svg>
-                                <p class="text-lg font-medium">Passive Tree Viewer</p>
-                                <p class="text-sm mt-2">Interactive tree coming in Phase 3.5</p>
-                            </div>
-                        </div>
+                        <div id="passive-tree-container" class="bg-gray-900 rounded-lg border border-gray-700 h-[700px] relative"></div>
                     </div>
                 </div>
             </div>
@@ -125,6 +117,17 @@
 {% endblock %}
 
 {% block scripts %}
+<script type="module">
+import { PassiveTreeViewer } from '/assets/js/modules/PassiveTreeViewer.js';
+
+// Initialize Passive Tree Viewer (read-only)
+const treeContainer = document.getElementById('passive-tree-container');
+const treeViewer = new PassiveTreeViewer(treeContainer);
+
+// Load build's passive tree data if available
+// TODO: Load from build data
+</script>
+
 <script>
 async function cloneBuild() {
     try {
