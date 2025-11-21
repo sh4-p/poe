@@ -19,6 +19,8 @@ export class PassiveTreeViewer {
             startingNodeRadius: 12,
             notableRadius: 10,
             keystoneRadius: 14,
+            useSprites: true, // Enable sprite rendering from GGG CDN
+            spriteZoomLevel: 0.2109, // Default zoom level (index 1)
             ...options
         };
 
@@ -34,6 +36,11 @@ export class PassiveTreeViewer {
         this.g = null;
         this.zoom = null;
         this.simulation = null;
+
+        // Sprite data from GGG
+        this.sprites = null;
+        this.spriteSheets = new Map(); // Cache for loaded sprite sheets
+        this.spriteImages = new Map(); // Cache for loaded images
 
         // Starting class position
         this.startingClass = null;
@@ -234,8 +241,17 @@ export class PassiveTreeViewer {
                 const apiData = await response.json();
 
                 if (apiData.success && apiData.tree) {
+                    // Store raw tree data for sprite access
+                    const rawTreeData = apiData.tree;
+
+                    // Extract sprite data from official tree
+                    if (rawTreeData.sprites && this.options.useSprites) {
+                        this.sprites = rawTreeData.sprites;
+                        console.log(`Loaded ${Object.keys(this.sprites).length} sprite sheets`);
+                    }
+
                     // Transform official POE data format to our format
-                    this.treeData = this.transformOfficialTreeData(apiData.tree);
+                    this.treeData = this.transformOfficialTreeData(rawTreeData);
                     console.log(`Loaded ${apiData.nodeCount} nodes from official POE data`);
                     showToast(`Passive tree loaded (${apiData.nodeCount} nodes)`, 'success');
                 } else {
@@ -715,6 +731,91 @@ export class PassiveTreeViewer {
             'bloodline': '◇'
         };
         return icons[type] || '·';
+    }
+
+    /**
+     * Get sprite data for a node icon
+     * Returns sprite coordinates from GGG sprite sheets
+     */
+    getSpriteForNode(node) {
+        if (!this.sprites || !node.icon) {
+            return null;
+        }
+
+        // Determine which sprite sheet based on node type and state
+        let spriteSheetKey;
+        const isAllocated = this.allocatedNodes.has(node.id);
+
+        // Map node types to sprite sheet keys based on GGG format
+        if (node.type === 'keystone') {
+            spriteSheetKey = isAllocated ? 'keystoneActive' : 'keystoneInactive';
+        } else if (node.type === 'notable') {
+            spriteSheetKey = isAllocated ? 'notableActive' : 'notableInactive';
+        } else if (node.type === 'mastery') {
+            spriteSheetKey = 'mastery';
+        } else if (node.type === 'jewel') {
+            spriteSheetKey = 'jewel';
+        } else {
+            spriteSheetKey = isAllocated ? 'normalActive' : 'normalInactive';
+        }
+
+        // Get sprite sheet for the desired zoom level
+        const zoomKey = this.options.spriteZoomLevel.toString();
+        const spriteSheet = this.sprites[spriteSheetKey];
+
+        if (!spriteSheet || !spriteSheet[zoomKey]) {
+            return null;
+        }
+
+        const zoomData = spriteSheet[zoomKey];
+
+        // Find coordinates for this node's icon
+        if (zoomData.coords && zoomData.coords[node.icon]) {
+            return {
+                url: zoomData.filename,
+                coords: zoomData.coords[node.icon],
+                sheetWidth: zoomData.w,
+                sheetHeight: zoomData.h
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Load and cache sprite sheet image
+     */
+    async loadSpriteImage(url) {
+        // Check cache first
+        if (this.spriteImages.has(url)) {
+            return this.spriteImages.get(url);
+        }
+
+        // Check if already loading
+        if (this.spriteSheets.has(url)) {
+            return this.spriteSheets.get(url);
+        }
+
+        // Create loading promise
+        const promise = new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous'; // Enable CORS
+            img.onload = () => {
+                this.spriteImages.set(url, img);
+                this.spriteSheets.delete(url); // Remove from loading
+                resolve(img);
+            };
+            img.onerror = () => {
+                this.spriteSheets.delete(url); // Remove from loading
+                reject(new Error(`Failed to load sprite: ${url}`));
+            };
+            img.src = url;
+        });
+
+        // Store promise while loading
+        this.spriteSheets.set(url, promise);
+
+        return promise;
     }
 
     /**
