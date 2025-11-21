@@ -111,6 +111,24 @@ export class PassiveTreeViewer {
         this.animationTime = 0;
         this.isAnimating = false;
 
+        // Build management
+        this.currentBuildName = null;
+
+        // Pathfinding
+        this.adjacencyList = new Map(); // Node connections for pathfinding
+        this.pathToHoveredNode = null; // Store path to show in mid layer
+
+        // Touch/mobile support
+        this.lastTouchDistance = 0;
+        this.touchStartX = 0;
+        this.touchStartY = 0;
+        this.isTouching = false;
+
+        // Search functionality
+        this.searchResults = [];
+        this.currentSearchIndex = -1;
+        this.searchQuery = '';
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -323,6 +341,12 @@ export class PassiveTreeViewer {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+        // Touch event handlers for mobile support
+        this.topCanvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+        this.topCanvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+        this.topCanvas.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+        this.topCanvas.addEventListener('touchcancel', (e) => this.handleTouchEnd(e), { passive: false });
     }
 
     /**
@@ -378,10 +402,145 @@ export class PassiveTreeViewer {
                 e.preventDefault();
                 break;
             case 'escape':
-                this.resetTree();
+                // Clear search if active, otherwise reset tree
+                if (this.searchResults.length > 0) {
+                    this.clearSearch();
+                } else {
+                    this.resetTree();
+                }
                 e.preventDefault();
                 break;
+            case 'f3':
+                // Navigate search results
+                if (e.shiftKey) {
+                    this.previousSearchResult();
+                } else {
+                    this.nextSearchResult();
+                }
+                e.preventDefault();
+                break;
+            case 'n':
+                // Next search result (Ctrl+N or Cmd+N)
+                if (e.ctrlKey || e.metaKey) {
+                    this.nextSearchResult();
+                    e.preventDefault();
+                }
+                break;
+            case 'p':
+                // Previous search result (Ctrl+P or Cmd+P)
+                if (e.ctrlKey || e.metaKey) {
+                    this.previousSearchResult();
+                    e.preventDefault();
+                }
+                break;
         }
+    }
+
+    /**
+     * Handle touch start (mobile support)
+     */
+    handleTouchStart(e) {
+        e.preventDefault(); // Prevent browser zoom/scroll
+
+        const touches = e.touches;
+
+        if (touches.length === 1) {
+            // Single touch - start panning
+            this.isTouching = true;
+            const rect = this.topCanvas.getBoundingClientRect();
+            this.touchStartX = touches[0].clientX - rect.left - this.viewport.x;
+            this.touchStartY = touches[0].clientY - rect.top - this.viewport.y;
+        } else if (touches.length === 2) {
+            // Two fingers - start pinch zoom
+            const dx = touches[1].clientX - touches[0].clientX;
+            const dy = touches[1].clientY - touches[0].clientY;
+            this.lastTouchDistance = Math.sqrt(dx * dx + dy * dy);
+        }
+    }
+
+    /**
+     * Handle touch move (mobile support)
+     */
+    handleTouchMove(e) {
+        e.preventDefault(); // Prevent browser zoom/scroll
+
+        const touches = e.touches;
+
+        if (touches.length === 1 && this.isTouching) {
+            // Single touch - pan
+            const rect = this.topCanvas.getBoundingClientRect();
+            const touchX = touches[0].clientX - rect.left;
+            const touchY = touches[0].clientY - rect.top;
+
+            this.viewport.x = touchX - this.touchStartX;
+            this.viewport.y = touchY - this.touchStartY;
+
+            this.markAllTilesDirty();
+            this.render();
+        } else if (touches.length === 2) {
+            // Two fingers - pinch zoom
+            const dx = touches[1].clientX - touches[0].clientX;
+            const dy = touches[1].clientY - touches[0].clientY;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+            if (this.lastTouchDistance > 0) {
+                const delta = currentDistance - this.lastTouchDistance;
+
+                // Zoom threshold (pixels of pinch movement needed)
+                const zoomThreshold = 30;
+
+                if (delta > zoomThreshold) {
+                    this.zoomIn();
+                    this.lastTouchDistance = currentDistance;
+                } else if (delta < -zoomThreshold) {
+                    this.zoomOut();
+                    this.lastTouchDistance = currentDistance;
+                }
+            } else {
+                this.lastTouchDistance = currentDistance;
+            }
+        }
+    }
+
+    /**
+     * Handle touch end (mobile support)
+     */
+    handleTouchEnd(e) {
+        e.preventDefault();
+
+        const touches = e.touches;
+
+        // If a single tap (no movement), treat as click
+        if (touches.length === 0 && this.isTouching) {
+            // Get the last touch position from changedTouches
+            const lastTouch = e.changedTouches[0];
+            const rect = this.topCanvas.getBoundingClientRect();
+            const canvasX = lastTouch.clientX - rect.left;
+            const canvasY = lastTouch.clientY - rect.top;
+
+            // Check if this was a tap (minimal movement)
+            const startCanvasX = this.touchStartX + this.viewport.x;
+            const startCanvasY = this.touchStartY + this.viewport.y;
+            const moveDistance = Math.sqrt(
+                Math.pow(canvasX - startCanvasX, 2) +
+                Math.pow(canvasY - startCanvasY, 2)
+            );
+
+            // If movement was small (< 10px), treat as tap/click
+            if (moveDistance < 10) {
+                const worldX = (canvasX - this.viewport.x) / this.viewport.scale;
+                const worldY = (canvasY - this.viewport.y) / this.viewport.scale;
+
+                const tappedNode = this.findNodeAt(worldX, worldY);
+                if (tappedNode) {
+                    this.toggleNode(tappedNode);
+                }
+            }
+        }
+
+        // Reset touch state
+        this.isTouching = false;
+        this.lastTouchDistance = 0;
     }
 
     /**
@@ -401,6 +560,14 @@ export class PassiveTreeViewer {
 
         if (hoveredNode !== this.hoveredNode) {
             this.hoveredNode = hoveredNode;
+
+            // Calculate path to hovered node if unallocated
+            if (hoveredNode && !this.allocatedNodes.has(hoveredNode.id) && this.allocatedNodes.size > 0) {
+                this.pathToHoveredNode = this.findPathToNode(hoveredNode.id);
+            } else {
+                this.pathToHoveredNode = null;
+            }
+
             this.renderMidLayer(); // Update highlights
 
             if (hoveredNode) {
@@ -554,12 +721,18 @@ export class PassiveTreeViewer {
             const nodeCount = this.treeData.nodes.length;
             const linkCount = this.treeData.links.length;
 
+            // Build adjacency list for pathfinding
+            this.buildAdjacencyList();
+
             console.log(`✅ Transformed ${nodeCount} nodes and ${linkCount} connections`);
             showToast(`Passive tree loaded (${nodeCount} nodes)`, 'success');
 
             // Initial render
             this.centerView();
             this.render();
+
+            // Auto-import from URL hash if present (shared builds)
+            this.importFromLocationHash();
 
         } catch (error) {
             console.error('❌ Failed to load tree data:', error);
@@ -1564,18 +1737,235 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Render path preview showing shortest path to hovered node
+     */
+    renderPathPreview(ctx, pathData) {
+        if (!pathData?.path || !this.treeData?.nodes) return;
+
+        const { path, cost } = pathData;
+        const nodeMap = new Map(this.treeData.nodes.map(n => [n.id, n]));
+
+        // Draw path connections
+        for (let i = 0; i < path.length - 1; i++) {
+            const sourceNode = nodeMap.get(path[i]);
+            const targetNode = nodeMap.get(path[i + 1]);
+
+            if (!sourceNode || !targetNode) continue;
+
+            // Skip already allocated connections
+            const isAllocated = this.allocatedNodes.has(sourceNode.id) &&
+                              this.allocatedNodes.has(targetNode.id);
+
+            if (isAllocated) continue;
+
+            // Draw preview path with distinctive style
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(sourceNode.x, sourceNode.y);
+            ctx.lineTo(targetNode.x, targetNode.y);
+
+            // Animated dashed line for path preview
+            const dashSpeed = 0.001;
+            const dashOffset = (this.animationTime * dashSpeed) % 20;
+            ctx.setLineDash([10, 10]);
+            ctx.lineDashOffset = -dashOffset;
+
+            // Cyan/blue color for path preview
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 4;
+            ctx.globalAlpha = 0.7;
+            ctx.lineCap = 'round';
+
+            // Add glow
+            ctx.shadowColor = '#3b82f6';
+            ctx.shadowBlur = 8;
+
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Draw preview nodes (nodes that will be allocated)
+        path.forEach((nodeId, index) => {
+            // Skip first node (already allocated) and last node (hovered, already highlighted)
+            if (index === 0 || index === path.length - 1) return;
+
+            // Skip already allocated nodes
+            if (this.allocatedNodes.has(nodeId)) return;
+
+            const node = nodeMap.get(nodeId);
+            if (!node) return;
+
+            const nodeRadius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
+
+            // Draw preview node indicator
+            ctx.save();
+
+            // Outer glow
+            const glowGradient = ctx.createRadialGradient(
+                node.x, node.y, nodeRadius * 0.5,
+                node.x, node.y, nodeRadius * 1.5
+            );
+            glowGradient.addColorStop(0, 'rgba(59, 130, 246, 0.6)');
+            glowGradient.addColorStop(0.7, 'rgba(59, 130, 246, 0.3)');
+            glowGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, nodeRadius * 1.5, 0, Math.PI * 2);
+            ctx.fillStyle = glowGradient;
+            ctx.fill();
+
+            // Ring indicator
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, nodeRadius + 2, 0, Math.PI * 2);
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.8;
+            ctx.stroke();
+
+            ctx.restore();
+        });
+
+        // Display cost indicator on hovered node
+        if (cost > 0 && this.hoveredNode) {
+            ctx.save();
+
+            const costText = `${cost} pts`;
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const nodeRadius = (this.nodeSizes[this.hoveredNode.type] || this.nodeSizes.normal) / 2;
+            const textY = this.hoveredNode.y - nodeRadius - 20;
+
+            // Background
+            const textMetrics = ctx.measureText(costText);
+            const padding = 6;
+            const bgWidth = textMetrics.width + padding * 2;
+            const bgHeight = 20;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(
+                this.hoveredNode.x - bgWidth / 2,
+                textY - bgHeight / 2,
+                bgWidth,
+                bgHeight
+            );
+
+            // Border
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+                this.hoveredNode.x - bgWidth / 2,
+                textY - bgHeight / 2,
+                bgWidth,
+                bgHeight
+            );
+
+            // Text
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillText(costText, this.hoveredNode.x, textY);
+
+            ctx.restore();
+        }
+    }
+
+    /**
+     * Render search result highlights
+     */
+    renderSearchHighlights(ctx) {
+        if (!this.searchResults || this.searchResults.length === 0) return;
+
+        this.searchResults.forEach((result, index) => {
+            const node = result.node;
+            const nodeRadius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
+            const isCurrent = index === this.currentSearchIndex;
+
+            ctx.save();
+
+            // Different style for current result vs other results
+            if (isCurrent) {
+                // Current result: bright green pulsing glow
+                const pulseSpeed = 0.003;
+                const minOpacity = 0.5;
+                const maxOpacity = 1.0;
+                const opacity = minOpacity + (maxOpacity - minOpacity) *
+                               (0.5 + 0.5 * Math.sin(this.animationTime * pulseSpeed));
+
+                // Outer glow
+                const glowRadius = nodeRadius * 2.5;
+                const gradient = ctx.createRadialGradient(
+                    node.x, node.y, nodeRadius,
+                    node.x, node.y, glowRadius
+                );
+                gradient.addColorStop(0, 'rgba(34, 197, 94, ' + (opacity * 0.8) + ')'); // Green
+                gradient.addColorStop(0.5, 'rgba(34, 197, 94, ' + (opacity * 0.4) + ')');
+                gradient.addColorStop(1, 'rgba(34, 197, 94, 0)');
+
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                // Ring
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius + 4, 0, Math.PI * 2);
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 3;
+                ctx.globalAlpha = opacity;
+                ctx.stroke();
+            } else {
+                // Other results: subtle yellow glow
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius + 3, 0, Math.PI * 2);
+                ctx.strokeStyle = '#eab308';
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.5;
+                ctx.stroke();
+
+                // Small yellow dot
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#eab308';
+                ctx.globalAlpha = 0.7;
+                ctx.fill();
+            }
+
+            ctx.restore();
+        });
+
+        // Ensure animation continues for search highlights
+        if (this.searchResults.length > 0 && !this.isAnimating) {
+            this.startAnimation();
+        }
+    }
+
+    /**
      * Render mid canvas (highlights and animations)
      */
     renderMidLayer() {
         // Clear
         this.midCtx.clearRect(0, 0, this.options.width, this.options.height);
 
-        if (!this.hoveredNode) return;
-
         // Save context
         this.midCtx.save();
         this.midCtx.translate(this.viewport.x, this.viewport.y);
         this.midCtx.scale(this.viewport.scale, this.viewport.scale);
+
+        // Draw search result highlights (if any)
+        if (this.searchResults.length > 0) {
+            this.renderSearchHighlights(this.midCtx);
+        }
+
+        // Draw path preview if available (only if hovering)
+        if (this.hoveredNode && this.pathToHoveredNode?.path && this.pathToHoveredNode.path.length > 1) {
+            this.renderPathPreview(this.midCtx, this.pathToHoveredNode);
+        }
+
+        // Draw animated hover highlight (only if hovering)
+        if (!this.hoveredNode) {
+            this.midCtx.restore();
+            return;
+        }
 
         // Draw animated hover highlight
         const radius = (this.nodeSizes[this.hoveredNode.type] || this.nodeSizes.normal) / 2;
@@ -1771,6 +2161,436 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Build adjacency list from tree links for pathfinding
+     * Called once when tree data is loaded
+     */
+    buildAdjacencyList() {
+        this.adjacencyList.clear();
+
+        if (!this.treeData?.links) return;
+
+        // Initialize adjacency list for all nodes
+        this.treeData.nodes.forEach(node => {
+            this.adjacencyList.set(node.id, []);
+        });
+
+        // Build bidirectional adjacency list
+        this.treeData.links.forEach(link => {
+            const sourceId = link.source;
+            const targetId = link.target;
+
+            // Add edge in both directions (undirected graph)
+            if (this.adjacencyList.has(sourceId)) {
+                this.adjacencyList.get(sourceId).push(targetId);
+            }
+            if (this.adjacencyList.has(targetId)) {
+                this.adjacencyList.get(targetId).push(sourceId);
+            }
+        });
+    }
+
+    /**
+     * Find shortest path between two nodes using BFS
+     * Returns array of node IDs representing the path, or null if no path exists
+     */
+    findShortestPath(startNodeId, endNodeId) {
+        if (!this.adjacencyList.has(startNodeId) || !this.adjacencyList.has(endNodeId)) {
+            return null;
+        }
+
+        if (startNodeId === endNodeId) {
+            return [startNodeId];
+        }
+
+        // BFS to find shortest path
+        const queue = [[startNodeId]];
+        const visited = new Set([startNodeId]);
+
+        while (queue.length > 0) {
+            const path = queue.shift();
+            const currentNodeId = path[path.length - 1];
+
+            // Get neighbors
+            const neighbors = this.adjacencyList.get(currentNodeId) || [];
+
+            for (const neighborId of neighbors) {
+                if (visited.has(neighborId)) continue;
+
+                const newPath = [...path, neighborId];
+
+                // Found the target
+                if (neighborId === endNodeId) {
+                    return newPath;
+                }
+
+                visited.add(neighborId);
+                queue.push(newPath);
+            }
+        }
+
+        return null; // No path found
+    }
+
+    /**
+     * Find shortest path from any allocated node to target node
+     * Returns {path: [], cost: number, startNodeId: string} or null
+     */
+    findPathToNode(targetNodeId) {
+        if (!this.treeData?.nodes) return null;
+
+        // If target is already allocated, no path needed
+        if (this.allocatedNodes.has(targetNodeId)) {
+            return { path: [targetNodeId], cost: 0, startNodeId: targetNodeId };
+        }
+
+        let shortestPath = null;
+        let minCost = Infinity;
+        let bestStartNodeId = null;
+
+        // Try to find path from each allocated node
+        this.allocatedNodes.forEach(allocatedNodeId => {
+            const path = this.findShortestPath(allocatedNodeId, targetNodeId);
+
+            if (path) {
+                const cost = this.getPathCost(path);
+
+                if (cost < minCost) {
+                    minCost = cost;
+                    shortestPath = path;
+                    bestStartNodeId = allocatedNodeId;
+                }
+            }
+        });
+
+        if (shortestPath) {
+            return {
+                path: shortestPath,
+                cost: minCost,
+                startNodeId: bestStartNodeId
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Calculate point cost of a path
+     * Excludes already allocated nodes, class starts, and masteries
+     */
+    getPathCost(path) {
+        if (!path || !this.treeData?.nodes) return 0;
+
+        let cost = 0;
+
+        path.forEach(nodeId => {
+            // Skip already allocated nodes
+            if (this.allocatedNodes.has(nodeId)) return;
+
+            const node = this.treeData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            // Skip free nodes (POE official rules)
+            if (node.type === 'classStart') return; // Class start is free
+            if (node.type === 'mastery') return; // Masteries are free
+
+            cost++;
+        });
+
+        return cost;
+    }
+
+    /**
+     * Search nodes by name, type, or stats
+     * Returns array of matching nodes
+     */
+    searchNodes(query) {
+        if (!query || !this.treeData?.nodes) {
+            this.searchResults = [];
+            this.currentSearchIndex = -1;
+            this.searchQuery = '';
+            this.render();
+            return [];
+        }
+
+        this.searchQuery = query.toLowerCase();
+        const results = [];
+
+        this.treeData.nodes.forEach(node => {
+            // Search by name
+            if (node.name && node.name.toLowerCase().includes(this.searchQuery)) {
+                results.push({
+                    node: node,
+                    matchType: 'name',
+                    matchText: node.name
+                });
+                return;
+            }
+
+            // Search by type
+            if (node.type && node.type.toLowerCase().includes(this.searchQuery)) {
+                results.push({
+                    node: node,
+                    matchType: 'type',
+                    matchText: node.type
+                });
+                return;
+            }
+
+            // Search by stats (if available)
+            if (node.stats && Array.isArray(node.stats)) {
+                for (const stat of node.stats) {
+                    if (stat.toLowerCase().includes(this.searchQuery)) {
+                        results.push({
+                            node: node,
+                            matchType: 'stat',
+                            matchText: stat
+                        });
+                        return;
+                    }
+                }
+            }
+        });
+
+        this.searchResults = results;
+        this.currentSearchIndex = results.length > 0 ? 0 : -1;
+
+        // Navigate to first result
+        if (this.currentSearchIndex >= 0) {
+            this.navigateToSearchResult(0);
+        }
+
+        return results;
+    }
+
+    /**
+     * Navigate to specific search result
+     */
+    navigateToSearchResult(index) {
+        if (index < 0 || index >= this.searchResults.length) {
+            return false;
+        }
+
+        this.currentSearchIndex = index;
+        const result = this.searchResults[index];
+        const node = result.node;
+
+        // Center view on the node
+        const centerX = this.options.width / 2;
+        const centerY = this.options.height / 2;
+
+        this.viewport.x = centerX - (node.x * this.viewport.scale);
+        this.viewport.y = centerY - (node.y * this.viewport.scale);
+
+        this.markAllTilesDirty();
+        this.render();
+
+        // Show result info
+        const resultNumber = index + 1;
+        const totalResults = this.searchResults.length;
+        showToast(
+            `Result ${resultNumber}/${totalResults}: ${node.name} (${result.matchType})`,
+            'info'
+        );
+
+        return true;
+    }
+
+    /**
+     * Go to next search result
+     */
+    nextSearchResult() {
+        if (this.searchResults.length === 0) return false;
+
+        const nextIndex = (this.currentSearchIndex + 1) % this.searchResults.length;
+        return this.navigateToSearchResult(nextIndex);
+    }
+
+    /**
+     * Go to previous search result
+     */
+    previousSearchResult() {
+        if (this.searchResults.length === 0) return false;
+
+        const prevIndex = (this.currentSearchIndex - 1 + this.searchResults.length) % this.searchResults.length;
+        return this.navigateToSearchResult(prevIndex);
+    }
+
+    /**
+     * Clear search results
+     */
+    clearSearch() {
+        this.searchResults = [];
+        this.currentSearchIndex = -1;
+        this.searchQuery = '';
+        this.render();
+        showToast('Search cleared', 'info');
+    }
+
+    /**
+     * Get current search state
+     */
+    getSearchState() {
+        return {
+            query: this.searchQuery,
+            results: this.searchResults,
+            currentIndex: this.currentSearchIndex,
+            totalResults: this.searchResults.length
+        };
+    }
+
+    /**
+     * Export current build to URL-safe string
+     * Format: version|classId|ascendancyId|nodeIds
+     * Compatible with sharing and bookmarking
+     */
+    exportToPoeUrl() {
+        const version = '1'; // Our format version
+        const classId = this.selectedClass?.id || '';
+        const ascendancyId = this.selectedAscendancy || '';
+
+        // Get allocated nodes (exclude class start)
+        const allocatedNodeIds = Array.from(this.allocatedNodes)
+            .filter(nodeId => {
+                const node = this.treeData.nodes.find(n => n.id === nodeId);
+                return node && node.type !== 'classStart';
+            });
+
+        // Build data object
+        const buildData = {
+            version: version,
+            class: classId,
+            ascendancy: ascendancyId,
+            nodes: allocatedNodeIds
+        };
+
+        // Convert to JSON and encode
+        const jsonString = JSON.stringify(buildData);
+        const base64 = btoa(encodeURIComponent(jsonString));
+
+        // Generate URL
+        const baseUrl = window.location.origin + window.location.pathname;
+        const buildUrl = `${baseUrl}#build=${base64}`;
+
+        return buildUrl;
+    }
+
+    /**
+     * Import build from URL
+     * Parses URL hash or full URL with build data
+     */
+    importFromPoeUrl(url) {
+        try {
+            // Extract build data from URL
+            let buildData;
+
+            if (url.includes('#build=')) {
+                // Our format: #build=base64data
+                const hash = url.split('#build=')[1];
+                const decoded = decodeURIComponent(atob(hash));
+                buildData = JSON.parse(decoded);
+            } else if (url.includes('pathofexile.com')) {
+                // POE official URL - not yet implemented
+                showToast('POE official URLs not yet supported. Use export to generate compatible URLs.', 'warning');
+                return false;
+            } else {
+                throw new Error('Invalid URL format');
+            }
+
+            // Validate build data
+            if (!buildData.version || !buildData.nodes) {
+                throw new Error('Invalid build data structure');
+            }
+
+            // Reset current tree
+            this.allocatedNodes.clear();
+
+            // Load class if specified
+            if (buildData.class) {
+                this.selectClass(buildData.class);
+            }
+
+            // Load ascendancy if specified
+            if (buildData.ascendancy) {
+                this.selectedAscendancy = buildData.ascendancy;
+            }
+
+            // Load allocated nodes
+            buildData.nodes.forEach(nodeId => {
+                this.allocatedNodes.add(nodeId);
+            });
+
+            this.updatePointsDisplay();
+            this.centerView();
+            this.render();
+
+            showToast(`Build imported! ${buildData.nodes.length} nodes allocated`, 'success');
+            return true;
+
+        } catch (error) {
+            console.error('Import error:', error);
+            showToast('Failed to import build: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    /**
+     * Copy build URL to clipboard
+     */
+    async copyBuildUrl() {
+        try {
+            const url = this.exportToPoeUrl();
+
+            // Try modern clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(url);
+                showToast('Build URL copied to clipboard!', 'success');
+                return true;
+            }
+
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = url;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            const success = document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            if (success) {
+                showToast('Build URL copied to clipboard!', 'success');
+                return true;
+            } else {
+                throw new Error('Copy command failed');
+            }
+
+        } catch (error) {
+            console.error('Copy error:', error);
+
+            // Show URL in prompt as last resort
+            const url = this.exportToPoeUrl();
+            prompt('Copy this URL:', url);
+            return false;
+        }
+    }
+
+    /**
+     * Import build from URL in browser location hash
+     * Call this on page load to auto-import shared builds
+     */
+    importFromLocationHash() {
+        const hash = window.location.hash;
+
+        if (hash && hash.includes('#build=')) {
+            const url = window.location.href;
+            return this.importFromPoeUrl(url);
+        }
+
+        return false;
+    }
+
+    /**
      * Zoom in (next zoom level)
      */
     zoomIn() {
@@ -1847,9 +2667,168 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Save current build to localStorage
+     */
+    saveBuild(buildName) {
+        if (!buildName || !buildName.trim()) {
+            buildName = prompt('Enter build name:');
+            if (!buildName) return;
+        }
+
+        const build = {
+            name: buildName,
+            class: this.selectedClass?.id || null,
+            allocatedNodes: Array.from(this.allocatedNodes),
+            timestamp: Date.now(),
+            version: '1.0'
+        };
+
+        // Get existing builds
+        const builds = this.getSavedBuilds();
+
+        // Add or update build
+        builds[buildName] = build;
+
+        // Save to localStorage
+        localStorage.setItem('poe_passive_builds', JSON.stringify(builds));
+
+        this.currentBuildName = buildName;
+        showToast(`Build "${buildName}" saved!`, 'success');
+
+        return build;
+    }
+
+    /**
+     * Load build from localStorage
+     */
+    loadBuild(buildName) {
+        const builds = this.getSavedBuilds();
+        const build = builds[buildName];
+
+        if (!build) {
+            showToast(`Build "${buildName}" not found`, 'error');
+            return false;
+        }
+
+        // Reset current tree
+        this.allocatedNodes.clear();
+
+        // Load class
+        if (build.class) {
+            this.selectClass(build.class);
+        }
+
+        // Load allocated nodes
+        build.allocatedNodes.forEach(nodeId => {
+            this.allocatedNodes.add(nodeId);
+        });
+
+        this.currentBuildName = buildName;
+        this.updatePointsDisplay();
+        this.render();
+
+        showToast(`Build "${buildName}" loaded!`, 'success');
+        return true;
+    }
+
+    /**
+     * Get all saved builds
+     */
+    getSavedBuilds() {
+        const data = localStorage.getItem('poe_passive_builds');
+        return data ? JSON.parse(data) : {};
+    }
+
+    /**
+     * Delete saved build
+     */
+    deleteBuild(buildName) {
+        const builds = this.getSavedBuilds();
+
+        if (!builds[buildName]) {
+            showToast(`Build "${buildName}" not found`, 'error');
+            return false;
+        }
+
+        delete builds[buildName];
+        localStorage.setItem('poe_passive_builds', JSON.stringify(builds));
+
+        if (this.currentBuildName === buildName) {
+            this.currentBuildName = null;
+        }
+
+        showToast(`Build "${buildName}" deleted!`, 'success');
+        return true;
+    }
+
+    /**
+     * Export build as JSON
+     */
+    exportBuild() {
+        const build = {
+            name: this.currentBuildName || 'Unnamed Build',
+            class: this.selectedClass?.id || null,
+            allocatedNodes: Array.from(this.allocatedNodes),
+            timestamp: Date.now(),
+            version: '1.0'
+        };
+
+        const json = JSON.stringify(build, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${build.name.replace(/[^a-z0-9]/gi, '_')}.json`;
+        a.click();
+
+        URL.revokeObjectURL(url);
+        showToast('Build exported!', 'success');
+    }
+
+    /**
+     * Import build from JSON
+     */
+    importBuild(jsonString) {
+        try {
+            const build = JSON.parse(jsonString);
+
+            // Validate build structure
+            if (!build.allocatedNodes || !Array.isArray(build.allocatedNodes)) {
+                throw new Error('Invalid build format');
+            }
+
+            // Reset tree
+            this.allocatedNodes.clear();
+
+            // Load class
+            if (build.class) {
+                this.selectClass(build.class);
+            }
+
+            // Load nodes
+            build.allocatedNodes.forEach(nodeId => {
+                this.allocatedNodes.add(nodeId);
+            });
+
+            this.currentBuildName = build.name || 'Imported Build';
+            this.updatePointsDisplay();
+            this.render();
+
+            showToast('Build imported successfully!', 'success');
+            return true;
+
+        } catch (error) {
+            showToast('Failed to import build: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    /**
      * Destroy viewer
      */
     destroy() {
+        this.stopAnimation();
         this.container.innerHTML = '';
     }
 }
