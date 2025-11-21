@@ -43,16 +43,33 @@ class DataScraperService
         echo "📊 Scraping passive tree data...\n";
 
         try {
-            // Official PoE passive tree URL (example - actual URL may vary)
-            $url = 'https://www.pathofexile.com/passive-skill-tree/data.json';
+            // Try official GitHub repo first (most reliable)
+            $urls = [
+                "https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding/master/src/Data/3_0/PassiveSkillTree.json",
+                "https://www.pathofexile.com/passive-skill-tree/data.json"
+            ];
 
-            $response = $this->httpClient->get($url);
-            $treeData = $response->getBody()->getContents();
+            $treeData = null;
+            foreach ($urls as $url) {
+                try {
+                    echo "  Trying: {$url}\n";
+                    $response = $this->httpClient->get($url);
+                    $treeData = $response->getBody()->getContents();
 
-            // Validate JSON
-            $decoded = json_decode($treeData, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new \Exception('Invalid JSON received');
+                    // Validate JSON
+                    $decoded = json_decode($treeData, true);
+                    if (json_last_error() === JSON_ERROR_NONE && isset($decoded['nodes'])) {
+                        echo "  ✓ Successfully retrieved tree data\n";
+                        break;
+                    }
+                } catch (\Exception $e) {
+                    echo "  ✗ Failed: " . $e->getMessage() . "\n";
+                    continue;
+                }
+            }
+
+            if (!$treeData) {
+                throw new \Exception('Failed to fetch from all sources');
             }
 
             // Save to file
@@ -65,27 +82,188 @@ class DataScraperService
 
             file_put_contents($filename, $treeData);
 
+            $decoded = json_decode($treeData, true);
             echo "✓ Passive tree saved to: {$filename}\n";
             echo "  Nodes: " . count($decoded['nodes'] ?? []) . "\n";
+
+            // Also save to database
+            $this->gameDataModel->savePassiveTree($version, $decoded);
+            echo "  ✓ Saved to database\n";
 
             return true;
 
         } catch (\Exception $e) {
             echo "✗ Failed to scrape passive tree: " . $e->getMessage() . "\n";
             error_log("Passive tree scraping error: " . $e->getMessage());
+
+            // Create minimal sample tree if all else fails
+            $this->createSamplePassiveTree($version);
             return false;
         }
     }
 
     /**
-     * Scrape unique items
+     * Create sample passive tree for development
+     */
+    private function createSamplePassiveTree(string $version): void
+    {
+        $sampleTree = [
+            'version' => $version,
+            'nodes' => [
+                '0' => [
+                    'id' => 0,
+                    'name' => 'Scion Start',
+                    'type' => 'start',
+                    'stats' => [],
+                    'x' => 0,
+                    'y' => 0
+                ]
+            ],
+            'links' => []
+        ];
+
+        $filename = "{$this->dataDir}/passive-tree/{$version}.json";
+        $dir = dirname($filename);
+
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+
+        file_put_contents($filename, json_encode($sampleTree, JSON_PRETTY_PRINT));
+        echo "  ✓ Created sample passive tree\n";
+    }
+
+    /**
+     * Scrape unique items from poe.ninja
      */
     public function scrapeUniques(string $version = '3.25'): int
     {
-        echo "🔮 Scraping unique items...\n";
+        echo "🔮 Scraping unique items from poe.ninja...\n";
 
-        // For demonstration, using sample data
-        // In production, this would scrape poedb.tw or use official API
+        try {
+            // poe.ninja API endpoint
+            $league = 'Standard'; // Can be made configurable
+            $url = "https://poe.ninja/api/data/itemoverview?league={$league}&type=UniqueArmour";
+
+            echo "  Fetching from: {$url}\n";
+            $response = $this->httpClient->get($url);
+            $data = json_decode($response->getBody()->getContents(), true);
+
+            if (!isset($data['lines']) || !is_array($data['lines'])) {
+                throw new \Exception('Invalid response format from poe.ninja');
+            }
+
+            echo "  ✓ Retrieved " . count($data['lines']) . " unique armours\n";
+
+            $count = 0;
+            foreach ($data['lines'] as $item) {
+                try {
+                    // Check if item already exists
+                    $existing = $this->gameDataModel->queryOne(
+                        "SELECT id FROM uniques WHERE name = ? AND poe_version = ? LIMIT 1",
+                        [$item['name'], $version]
+                    );
+
+                    if ($existing) {
+                        continue; // Skip duplicates
+                    }
+
+                    $this->gameDataModel->create([
+                        'name' => $item['name'],
+                        'base_item' => $item['baseType'] ?? 'Unknown',
+                        'inventory_icon' => $item['icon'] ?? null,
+                        'stats_json' => json_encode([
+                            'chaosValue' => $item['chaosValue'] ?? 0,
+                            'exaltedValue' => $item['exaltedValue'] ?? 0,
+                            'links' => $item['links'] ?? 0,
+                            'itemLevel' => $item['itemLevel'] ?? 0,
+                            'variant' => $item['variant'] ?? null
+                        ]),
+                        'poe_version' => $version,
+                    ]);
+                    $count++;
+                } catch (\Exception $e) {
+                    echo "  ✗ Failed: {$item['name']} - {$e->getMessage()}\n";
+                    continue;
+                }
+            }
+
+            echo "✓ Scraped {$count} unique items\n";
+
+            // Also try other item types
+            $itemTypes = ['UniqueWeapon', 'UniqueAccessory', 'UniqueJewel', 'UniqueFlask'];
+            foreach ($itemTypes as $type) {
+                $this->delay();
+                $count += $this->scrapeUniqueType($type, $league, $version);
+            }
+
+            return $count;
+
+        } catch (\Exception $e) {
+            echo "✗ Failed to scrape uniques: " . $e->getMessage() . "\n";
+
+            // Fallback to sample data
+            echo "  Using sample data instead...\n";
+            return $this->useSampleUniques($version);
+        }
+    }
+
+    /**
+     * Scrape specific unique item type
+     */
+    private function scrapeUniqueType(string $type, string $league, string $version): int
+    {
+        try {
+            $url = "https://poe.ninja/api/data/itemoverview?league={$league}&type={$type}";
+            echo "  Fetching {$type}...\n";
+
+            $response = $this->httpClient->get($url);
+            $data = json_decode($response->getBody()->getContents(), true);
+
+            if (!isset($data['lines'])) {
+                return 0;
+            }
+
+            $count = 0;
+            foreach ($data['lines'] as $item) {
+                try {
+                    $existing = $this->gameDataModel->queryOne(
+                        "SELECT id FROM uniques WHERE name = ? AND poe_version = ? LIMIT 1",
+                        [$item['name'], $version]
+                    );
+
+                    if ($existing) continue;
+
+                    $this->gameDataModel->create([
+                        'name' => $item['name'],
+                        'base_item' => $item['baseType'] ?? 'Unknown',
+                        'inventory_icon' => $item['icon'] ?? null,
+                        'stats_json' => json_encode([
+                            'chaosValue' => $item['chaosValue'] ?? 0,
+                            'type' => $type
+                        ]),
+                        'poe_version' => $version,
+                    ]);
+                    $count++;
+                } catch (\Exception $e) {
+                    continue;
+                }
+            }
+
+            echo "  ✓ Added {$count} from {$type}\n";
+            return $count;
+
+        } catch (\Exception $e) {
+            echo "  ✗ Failed {$type}: " . $e->getMessage() . "\n";
+            return 0;
+        }
+    }
+
+    /**
+     * Use sample uniques as fallback
+     */
+    private function useSampleUniques(string $version): int
+    {
         $sampleUniques = $this->getSampleUniques($version);
 
         $count = 0;
@@ -99,9 +277,8 @@ class DataScraperService
                     'poe_version' => $version,
                 ]);
                 $count++;
-                echo "  ✓ Added: {$unique['name']}\n";
             } catch (\Exception $e) {
-                echo "  ✗ Failed: {$unique['name']} - {$e->getMessage()}\n";
+                continue;
             }
         }
 

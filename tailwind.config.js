@@ -2,27 +2,28 @@
 module.exports = {
   content: [
     "./app/Views/**/*.twig",
-    "./public/assets/js/**/*.js",
+    "./public/**/*.{html,js}",
+    "./public/assets/js/**/*.js"
   ],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        'poe-dark': '#1a1a1a',
-        'poe-brown': '#38250e',
-        'poe-gold': '#af8551',
-        'poe-unique': '#af5025',
-        'poe-rare': '#ffff77',
-        'poe-magic': '#8888ff',
-        'poe-normal': '#c8c8c8',
-        'poe-currency': '#aa9e82',
-        'poe-gem': '#1ba29b',
-        'poe-fire': '#ff6060',
-        'poe-cold': '#6060ff',
-        'poe-lightning': '#ffff60',
+        'poe': {
+          'unique': '#af6025',
+          'rare': '#ffff77',
+          'magic': '#8888ff',
+          'currency': '#aa9e82',
+          'dark': '#0a0a0a',
+          'darker': '#050505',
+        }
       },
-      fontFamily: {
-        'poe': ['Fontin', 'sans-serif'],
+      minHeight: {
+        'touch': '44px',
       },
+      minWidth: {
+        'touch': '44px',
+      }
     },
   },
   plugins: [],
