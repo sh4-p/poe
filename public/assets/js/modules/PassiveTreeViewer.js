@@ -528,19 +528,148 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Render the tree (PoB style - cleaner visualization)
+     * Render the tree with official GGG assets (Full POE style)
      */
-    renderTree() {
-        if (!this.treeData) return;
+    async renderTree() {
+        if (!this.treeData || !this.rawTreeData) return;
 
-        // Clear existing
-        this.g.selectAll('*').remove();
+        console.log('🎨 Rendering passive tree with GGG official assets...');
 
-        // Create node lookup for performance
+        // Clear all layers
+        this.backgroundLayer.selectAll('*').remove();
+        this.groupBackgroundLayer.selectAll('*').remove();
+        this.connectionLayer.selectAll('*').remove();
+        this.nodeLayer.selectAll('*').remove();
+
+        // 1. Render tree background
+        await this.renderBackground();
+
+        // 2. Render group backgrounds
+        await this.renderGroupBackgrounds();
+
+        // 3. Render connections between nodes
+        this.renderConnections();
+
+        // 4. Render nodes with GGG sprites
+        await this.renderNodes();
+
+        console.log('✅ Tree rendering complete');
+    }
+
+    /**
+     * Render tree background image
+     */
+    async renderBackground() {
+        const zoomLevel = this.options.spriteZoomLevel;
+        const backgroundUrl = `${this.options.assetBaseUrl}background-${zoomLevel}.png`;
+
+        try {
+            // Load background image
+            const img = await this.loadSpriteImage(backgroundUrl);
+
+            // Calculate bounds from tree data
+            const minX = this.rawTreeData.min_x || -15000;
+            const minY = this.rawTreeData.min_y || -15000;
+            const maxX = this.rawTreeData.max_x || 15000;
+            const maxY = this.rawTreeData.max_y || 15000;
+
+            // Add background image centered
+            this.backgroundLayer.append('image')
+                .attr('xlink:href', backgroundUrl)
+                .attr('x', minX)
+                .attr('y', minY)
+                .attr('width', maxX - minX)
+                .attr('height', maxY - minY)
+                .style('opacity', 0.15) // Subtle background
+                .style('pointer-events', 'none');
+
+            console.log('✓ Background rendered');
+        } catch (error) {
+            console.warn('Background image failed to load, using fallback:', error.message);
+            // Fallback: dark radial gradient
+            this.svg.style('background', 'radial-gradient(circle, #0a0a0a 0%, #000000 100%)');
+        }
+    }
+
+    /**
+     * Render group backgrounds (PSGroupBackground1-3)
+     */
+    async renderGroupBackgrounds() {
+        if (!this.rawTreeData.groups) return;
+
+        const zoomLevel = this.options.spriteZoomLevel;
+        const groupBgUrl = `${this.options.assetBaseUrl}group-background-${zoomLevel}.png`;
+
+        try {
+            // Preload group background sprite
+            await this.loadSpriteImage(groupBgUrl);
+
+            // Render backgrounds for groups that have them
+            for (const [groupId, groupData] of Object.entries(this.rawTreeData.groups)) {
+                if (groupData.background) {
+                    const bg = groupData.background;
+
+                    // Calculate size based on orbits
+                    const orbits = groupData.orbits || [0];
+                    const maxOrbit = Math.max(...orbits);
+                    const size = maxOrbit > 0 ? 150 : 100;
+
+                    // Add group background
+                    this.groupBackgroundLayer.append('image')
+                        .attr('xlink:href', groupBgUrl)
+                        .attr('x', groupData.x - size / 2)
+                        .attr('y', groupData.y - size / 2)
+                        .attr('width', size)
+                        .attr('height', size)
+                        .style('opacity', 0.3)
+                        .style('pointer-events', 'none');
+                }
+            }
+
+            console.log('✓ Group backgrounds rendered');
+        } catch (error) {
+            console.warn('Group backgrounds failed to load:', error.message);
+        }
+    }
+
+    /**
+     * Render connections between nodes using GGG line sprites
+     */
+    renderConnections() {
+        if (!this.treeData.links) return;
+
         const nodeMap = new Map(this.treeData.nodes.map(n => [n.id, n]));
 
-        // Filter nodes - only show important ones for clarity
-        // In a real build, we'd only show allocated + nearby nodes
+        this.treeData.links.forEach(link => {
+            const source = nodeMap.get(link.source);
+            const target = nodeMap.get(link.target);
+
+            if (!source || !target) return;
+
+            const isAllocated = this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id);
+
+            // Draw line
+            this.connectionLayer.append('line')
+                .attr('x1', source.x)
+                .attr('y1', source.y)
+                .attr('x2', target.x)
+                .attr('y2', target.y)
+                .attr('stroke', isAllocated ? '#b89968' : '#4a4a4a') // Gold or dark gray
+                .attr('stroke-width', isAllocated ? 4 : 2)
+                .attr('stroke-linecap', 'round')
+                .style('opacity', isAllocated ? 0.9 : 0.4);
+        });
+
+        console.log(`✓ Rendered ${this.treeData.links.length} connections`);
+    }
+
+    /**
+     * Render nodes using GGG sprite sheets
+     */
+    async renderNodes() {
+        if (!this.treeData.nodes) return;
+
+        // Filter to important nodes only
         const visibleNodes = this.treeData.nodes.filter(n =>
             n.type === 'keystone' ||
             n.type === 'notable' ||
@@ -551,124 +680,155 @@ export class PassiveTreeViewer {
             this.allocatedNodes.has(n.id)
         );
 
-        // Draw connection lines (thinner, darker)
-        const linkGroup = this.g.append('g')
-            .attr('class', 'links')
-            .style('opacity', 0.3);
+        console.log(`Rendering ${visibleNodes.length} nodes (${this.treeData.nodes.length} total)`);
 
-        this.treeData.links.forEach(link => {
-            const source = nodeMap.get(link.source);
-            const target = nodeMap.get(link.target);
+        for (const node of visibleNodes) {
+            await this.renderNode(node);
+        }
 
-            if (!source || !target) return;
-
-            // Only draw links between visible important nodes
-            const sourceVisible = visibleNodes.find(n => n.id === source.id);
-            const targetVisible = visibleNodes.find(n => n.id === target.id);
-
-            if (!sourceVisible && !targetVisible) return;
-
-            linkGroup.append('line')
-                .attr('x1', source.x)
-                .attr('y1', source.y)
-                .attr('x2', target.x)
-                .attr('y2', target.y)
-                .attr('stroke', this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id) ? '#d4af37' : '#444')
-                .attr('stroke-width', this.allocatedNodes.has(source.id) && this.allocatedNodes.has(target.id) ? 3 : 1.5)
-                .attr('stroke-linecap', 'round');
-        });
-
-        // Draw all normal nodes as tiny dots (for context)
-        const normalNodes = this.g.append('g')
-            .attr('class', 'normal-nodes')
-            .style('opacity', 0.25);
-
+        // Render small dots for normal nodes (context)
         this.treeData.nodes
             .filter(n => n.type === 'normal' && !this.allocatedNodes.has(n.id))
             .forEach(node => {
-                normalNodes.append('circle')
+                this.nodeLayer.append('circle')
                     .attr('cx', node.x)
                     .attr('cy', node.y)
                     .attr('r', 3)
-                    .attr('fill', '#666')
-                    .attr('stroke', 'none');
+                    .attr('fill', '#333')
+                    .style('opacity', 0.3);
             });
 
-        // Draw important nodes (keystones, notables, etc.)
-        const nodeGroup = this.g.append('g')
-            .attr('class', 'important-nodes');
+        console.log('✓ All nodes rendered');
+    }
 
-        visibleNodes.forEach(node => {
-            const isAllocated = this.allocatedNodes.has(node.id);
-            const g = nodeGroup.append('g')
-                .attr('class', 'node')
-                .attr('transform', `translate(${node.x}, ${node.y})`)
-                .style('cursor', 'pointer')
-                .on('click', (event) => this.handleNodeClick(event, node))
-                .on('mouseenter', (event) => this.handleNodeHover(event, node))
-                .on('mouseleave', () => this.handleNodeLeave());
+    /**
+     * Render individual node with sprite from GGG sprite sheet
+     */
+    async renderNode(node) {
+        const isAllocated = this.allocatedNodes.has(node.id);
+        const spriteData = this.getSpriteForNode(node);
 
-            // Glow effect for allocated nodes
-            if (isAllocated) {
-                g.append('circle')
-                    .attr('r', this.getNodeRadius(node) + 4)
-                    .attr('fill', 'none')
-                    .attr('stroke', '#f59e0b')
-                    .attr('stroke-width', 2)
-                    .style('opacity', 0.6)
-                    .style('filter', 'blur(3px)');
+        // Node group for hover/click
+        const g = this.nodeLayer.append('g')
+            .attr('class', 'tree-node')
+            .attr('data-node-id', node.id)
+            .style('cursor', 'pointer')
+            .on('click', (event) => this.handleNodeClick(event, node))
+            .on('mouseenter', (event) => this.handleNodeHover(event, node))
+            .on('mouseleave', () => this.handleNodeLeave());
+
+        if (spriteData && this.options.useSprites) {
+            // Use GGG sprite
+            try {
+                await this.loadSpriteImage(spriteData.url);
+
+                const coords = spriteData.coords;
+                const scale = this.getSpriteScale(node);
+
+                // Create clip path for this sprite
+                const clipId = `clip-${node.id}`;
+                const defs = this.svg.select('defs');
+
+                defs.append('clipPath')
+                    .attr('id', clipId)
+                    .append('rect')
+                    .attr('x', 0)
+                    .attr('y', 0)
+                    .attr('width', coords.w)
+                    .attr('height', coords.h);
+
+                // Add sprite from sheet
+                g.append('image')
+                    .attr('xlink:href', spriteData.url)
+                    .attr('x', node.x - (coords.w * scale) / 2)
+                    .attr('y', node.y - (coords.h * scale) / 2)
+                    .attr('width', spriteData.sheetWidth * scale)
+                    .attr('height', spriteData.sheetHeight * scale)
+                    .attr('clip-path', `url(#${clipId})`)
+                    .style('transform', `translate(${-coords.x * scale}px, ${-coords.y * scale}px)`)
+                    .style('opacity', isAllocated ? 1 : 0.6);
+
+            } catch (error) {
+                // Fallback to colored circle
+                this.renderNodeFallback(g, node, isAllocated);
             }
+        } else {
+            // Fallback to colored circle
+            this.renderNodeFallback(g, node, isAllocated);
+        }
 
-            // Main node circle
+        // Add glow for allocated nodes
+        if (isAllocated) {
+            g.style('filter', 'url(#node-glow)');
+        }
+
+        // Add label for keystones and allocated notables
+        if (node.type === 'keystone' || (node.type === 'notable' && isAllocated)) {
+            const radius = this.getNodeRadius(node);
+            this.nodeLayer.append('text')
+                .attr('x', node.x)
+                .attr('y', node.y + radius + 16)
+                .attr('text-anchor', 'middle')
+                .attr('fill', isAllocated ? '#d4af37' : '#999')
+                .attr('font-size', '11px')
+                .attr('font-weight', isAllocated ? 'bold' : 'normal')
+                .style('pointer-events', 'none')
+                .text(node.name || '');
+        }
+    }
+
+    /**
+     * Render node fallback (colored circle when sprite fails)
+     */
+    renderNodeFallback(g, node, isAllocated) {
+        const radius = this.getNodeRadius(node);
+
+        // Outer glow circle
+        if (isAllocated) {
             g.append('circle')
-                .attr('r', this.getNodeRadius(node))
-                .attr('fill', isAllocated ? this.getNodeColor(node) : '#2d3748')
-                .attr('stroke', isAllocated ? '#f59e0b' : this.getNodeColor(node))
-                .attr('stroke-width', isAllocated ? 2.5 : 2)
-                .style('opacity', isAllocated ? 1 : 0.7);
+                .attr('cx', node.x)
+                .attr('cy', node.y)
+                .attr('r', radius + 4)
+                .attr('fill', 'none')
+                .attr('stroke', '#f59e0b')
+                .attr('stroke-width', 2)
+                .style('opacity', 0.6);
+        }
 
-            // Inner circle for special nodes
-            if (node.type === 'keystone' || node.type === 'mastery') {
-                g.append('circle')
-                    .attr('r', this.getNodeRadius(node) - 4)
-                    .attr('fill', 'none')
-                    .attr('stroke', isAllocated ? '#fff' : this.getNodeColor(node))
-                    .attr('stroke-width', 1.5)
-                    .style('opacity', isAllocated ? 0.8 : 0.5);
-            }
+        // Main node circle
+        g.append('circle')
+            .attr('cx', node.x)
+            .attr('cy', node.y)
+            .attr('r', radius)
+            .attr('fill', isAllocated ? this.getNodeColor(node) : '#2d3748')
+            .attr('stroke', isAllocated ? '#f59e0b' : this.getNodeColor(node))
+            .attr('stroke-width', isAllocated ? 2.5 : 2)
+            .style('opacity', isAllocated ? 1 : 0.7);
 
-            // Node icon placeholder (would be sprite in full implementation)
-            if (node.type !== 'normal') {
-                g.append('text')
-                    .attr('text-anchor', 'middle')
-                    .attr('dominant-baseline', 'central')
-                    .attr('fill', isAllocated ? '#000' : '#888')
-                    .attr('font-size', '10px')
-                    .attr('font-weight', 'bold')
-                    .style('pointer-events', 'none')
-                    .text(this.getNodeIcon(node.type));
-            }
-        });
+        // Inner circle for special nodes
+        if (node.type === 'keystone' || node.type === 'mastery') {
+            g.append('circle')
+                .attr('cx', node.x)
+                .attr('cy', node.y)
+                .attr('r', radius - 4)
+                .attr('fill', 'none')
+                .attr('stroke', isAllocated ? '#fff' : this.getNodeColor(node))
+                .attr('stroke-width', 1.5)
+                .style('opacity', isAllocated ? 0.8 : 0.5);
+        }
+    }
 
-        // Add labels for keystones and allocated notables only
-        const labelGroup = this.g.append('g')
-            .attr('class', 'labels');
-
-        visibleNodes
-            .filter(n => n.type === 'keystone' || (n.type === 'notable' && this.allocatedNodes.has(n.id)))
-            .forEach(node => {
-                labelGroup.append('text')
-                    .attr('x', node.x)
-                    .attr('y', node.y + this.getNodeRadius(node) + 14)
-                    .attr('text-anchor', 'middle')
-                    .attr('fill', this.allocatedNodes.has(node.id) ? '#f59e0b' : '#a0aec0')
-                    .attr('font-size', '11px')
-                    .attr('font-weight', this.allocatedNodes.has(node.id) ? 'bold' : 'normal')
-                    .style('pointer-events', 'none')
-                    .text(node.name || '');
-            });
-
-        console.log(`Rendered ${visibleNodes.length} important nodes (total: ${this.treeData.nodes.length})`);
+    /**
+     * Get sprite scale based on node type
+     */
+    getSpriteScale(node) {
+        switch (node.type) {
+            case 'keystone': return 1.2;
+            case 'notable': return 1.0;
+            case 'mastery': return 1.1;
+            case 'jewel': return 1.0;
+            default: return 0.8;
+        }
     }
 
     /**
@@ -727,8 +887,8 @@ export class PassiveTreeViewer {
     }
 
     /**
-     * Get sprite data for a node icon
-     * Returns sprite coordinates from GGG sprite sheets
+     * Get sprite data for a node icon from GGG sprite sheets
+     * Returns sprite coordinates and URL
      */
     getSpriteForNode(node) {
         if (!this.sprites || !node.icon) {
@@ -739,40 +899,56 @@ export class PassiveTreeViewer {
         let spriteSheetKey;
         const isAllocated = this.allocatedNodes.has(node.id);
 
-        // Map node types to sprite sheet keys based on GGG format
+        // Map node types to GGG sprite sheet keys
         if (node.type === 'keystone') {
             spriteSheetKey = isAllocated ? 'keystoneActive' : 'keystoneInactive';
         } else if (node.type === 'notable') {
             spriteSheetKey = isAllocated ? 'notableActive' : 'notableInactive';
         } else if (node.type === 'mastery') {
-            spriteSheetKey = 'mastery';
+            // Mastery has multiple states
+            if (isAllocated) {
+                spriteSheetKey = 'masteryActiveSelected';
+            } else {
+                spriteSheetKey = 'masteryInactive';
+            }
         } else if (node.type === 'jewel') {
             spriteSheetKey = 'jewel';
+        } else if (node.type === 'classStart' || node.type === 'root') {
+            spriteSheetKey = 'startNode';
         } else {
+            // Normal nodes
             spriteSheetKey = isAllocated ? 'normalActive' : 'normalInactive';
         }
 
-        // Get sprite sheet for the desired zoom level
-        const zoomKey = this.options.spriteZoomLevel.toString();
         const spriteSheet = this.sprites[spriteSheetKey];
-
-        if (!spriteSheet || !spriteSheet[zoomKey]) {
+        if (!spriteSheet) {
+            console.warn(`Sprite sheet not found: ${spriteSheetKey}`);
             return null;
         }
 
-        const zoomData = spriteSheet[zoomKey];
+        // GGG uses zoom levels as keys: 0.1246, 0.2109, 0.2972, 0.3835
+        // We use index 0-3, convert to actual zoom level
+        const zoomLevels = this.rawTreeData.imageZoomLevels || [0.1246, 0.2109, 0.2972, 0.3835];
+        const zoomKey = zoomLevels[this.options.spriteZoomLevel];
+        const zoomData = spriteSheet[zoomKey.toString()];
 
-        // Find coordinates for this node's icon
-        if (zoomData.coords && zoomData.coords[node.icon]) {
-            return {
-                url: zoomData.filename,
-                coords: zoomData.coords[node.icon],
-                sheetWidth: zoomData.w,
-                sheetHeight: zoomData.h
-            };
+        if (!zoomData) {
+            console.warn(`Zoom data not found for level: ${zoomKey}`);
+            return null;
         }
 
-        return null;
+        // Find coordinates for this node's icon path
+        const coords = zoomData.coords && zoomData.coords[node.icon];
+        if (!coords) {
+            return null;
+        }
+
+        return {
+            url: zoomData.filename,
+            coords: coords,
+            sheetWidth: zoomData.w,
+            sheetHeight: zoomData.h
+        };
     }
 
     /**
