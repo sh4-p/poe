@@ -114,6 +114,10 @@ export class PassiveTreeViewer {
         // Build management
         this.currentBuildName = null;
 
+        // Pathfinding
+        this.adjacencyList = new Map(); // Node connections for pathfinding
+        this.pathToHoveredNode = null; // Store path to show in mid layer
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -404,6 +408,14 @@ export class PassiveTreeViewer {
 
         if (hoveredNode !== this.hoveredNode) {
             this.hoveredNode = hoveredNode;
+
+            // Calculate path to hovered node if unallocated
+            if (hoveredNode && !this.allocatedNodes.has(hoveredNode.id) && this.allocatedNodes.size > 0) {
+                this.pathToHoveredNode = this.findPathToNode(hoveredNode.id);
+            } else {
+                this.pathToHoveredNode = null;
+            }
+
             this.renderMidLayer(); // Update highlights
 
             if (hoveredNode) {
@@ -556,6 +568,9 @@ export class PassiveTreeViewer {
 
             const nodeCount = this.treeData.nodes.length;
             const linkCount = this.treeData.links.length;
+
+            // Build adjacency list for pathfinding
+            this.buildAdjacencyList();
 
             console.log(`✅ Transformed ${nodeCount} nodes and ${linkCount} connections`);
             showToast(`Passive tree loaded (${nodeCount} nodes)`, 'success');
@@ -1567,6 +1582,139 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Render path preview showing shortest path to hovered node
+     */
+    renderPathPreview(ctx, pathData) {
+        if (!pathData?.path || !this.treeData?.nodes) return;
+
+        const { path, cost } = pathData;
+        const nodeMap = new Map(this.treeData.nodes.map(n => [n.id, n]));
+
+        // Draw path connections
+        for (let i = 0; i < path.length - 1; i++) {
+            const sourceNode = nodeMap.get(path[i]);
+            const targetNode = nodeMap.get(path[i + 1]);
+
+            if (!sourceNode || !targetNode) continue;
+
+            // Skip already allocated connections
+            const isAllocated = this.allocatedNodes.has(sourceNode.id) &&
+                              this.allocatedNodes.has(targetNode.id);
+
+            if (isAllocated) continue;
+
+            // Draw preview path with distinctive style
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(sourceNode.x, sourceNode.y);
+            ctx.lineTo(targetNode.x, targetNode.y);
+
+            // Animated dashed line for path preview
+            const dashSpeed = 0.001;
+            const dashOffset = (this.animationTime * dashSpeed) % 20;
+            ctx.setLineDash([10, 10]);
+            ctx.lineDashOffset = -dashOffset;
+
+            // Cyan/blue color for path preview
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 4;
+            ctx.globalAlpha = 0.7;
+            ctx.lineCap = 'round';
+
+            // Add glow
+            ctx.shadowColor = '#3b82f6';
+            ctx.shadowBlur = 8;
+
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Draw preview nodes (nodes that will be allocated)
+        path.forEach((nodeId, index) => {
+            // Skip first node (already allocated) and last node (hovered, already highlighted)
+            if (index === 0 || index === path.length - 1) return;
+
+            // Skip already allocated nodes
+            if (this.allocatedNodes.has(nodeId)) return;
+
+            const node = nodeMap.get(nodeId);
+            if (!node) return;
+
+            const nodeRadius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
+
+            // Draw preview node indicator
+            ctx.save();
+
+            // Outer glow
+            const glowGradient = ctx.createRadialGradient(
+                node.x, node.y, nodeRadius * 0.5,
+                node.x, node.y, nodeRadius * 1.5
+            );
+            glowGradient.addColorStop(0, 'rgba(59, 130, 246, 0.6)');
+            glowGradient.addColorStop(0.7, 'rgba(59, 130, 246, 0.3)');
+            glowGradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, nodeRadius * 1.5, 0, Math.PI * 2);
+            ctx.fillStyle = glowGradient;
+            ctx.fill();
+
+            // Ring indicator
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, nodeRadius + 2, 0, Math.PI * 2);
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.8;
+            ctx.stroke();
+
+            ctx.restore();
+        });
+
+        // Display cost indicator on hovered node
+        if (cost > 0 && this.hoveredNode) {
+            ctx.save();
+
+            const costText = `${cost} pts`;
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const nodeRadius = (this.nodeSizes[this.hoveredNode.type] || this.nodeSizes.normal) / 2;
+            const textY = this.hoveredNode.y - nodeRadius - 20;
+
+            // Background
+            const textMetrics = ctx.measureText(costText);
+            const padding = 6;
+            const bgWidth = textMetrics.width + padding * 2;
+            const bgHeight = 20;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(
+                this.hoveredNode.x - bgWidth / 2,
+                textY - bgHeight / 2,
+                bgWidth,
+                bgHeight
+            );
+
+            // Border
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+                this.hoveredNode.x - bgWidth / 2,
+                textY - bgHeight / 2,
+                bgWidth,
+                bgHeight
+            );
+
+            // Text
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillText(costText, this.hoveredNode.x, textY);
+
+            ctx.restore();
+        }
+    }
+
+    /**
      * Render mid canvas (highlights and animations)
      */
     renderMidLayer() {
@@ -1579,6 +1727,11 @@ export class PassiveTreeViewer {
         this.midCtx.save();
         this.midCtx.translate(this.viewport.x, this.viewport.y);
         this.midCtx.scale(this.viewport.scale, this.viewport.scale);
+
+        // Draw path preview if available
+        if (this.pathToHoveredNode?.path && this.pathToHoveredNode.path.length > 1) {
+            this.renderPathPreview(this.midCtx, this.pathToHoveredNode);
+        }
 
         // Draw animated hover highlight
         const radius = (this.nodeSizes[this.hoveredNode.type] || this.nodeSizes.normal) / 2;
@@ -1771,6 +1924,145 @@ export class PassiveTreeViewer {
         });
 
         return counts;
+    }
+
+    /**
+     * Build adjacency list from tree links for pathfinding
+     * Called once when tree data is loaded
+     */
+    buildAdjacencyList() {
+        this.adjacencyList.clear();
+
+        if (!this.treeData?.links) return;
+
+        // Initialize adjacency list for all nodes
+        this.treeData.nodes.forEach(node => {
+            this.adjacencyList.set(node.id, []);
+        });
+
+        // Build bidirectional adjacency list
+        this.treeData.links.forEach(link => {
+            const sourceId = link.source;
+            const targetId = link.target;
+
+            // Add edge in both directions (undirected graph)
+            if (this.adjacencyList.has(sourceId)) {
+                this.adjacencyList.get(sourceId).push(targetId);
+            }
+            if (this.adjacencyList.has(targetId)) {
+                this.adjacencyList.get(targetId).push(sourceId);
+            }
+        });
+    }
+
+    /**
+     * Find shortest path between two nodes using BFS
+     * Returns array of node IDs representing the path, or null if no path exists
+     */
+    findShortestPath(startNodeId, endNodeId) {
+        if (!this.adjacencyList.has(startNodeId) || !this.adjacencyList.has(endNodeId)) {
+            return null;
+        }
+
+        if (startNodeId === endNodeId) {
+            return [startNodeId];
+        }
+
+        // BFS to find shortest path
+        const queue = [[startNodeId]];
+        const visited = new Set([startNodeId]);
+
+        while (queue.length > 0) {
+            const path = queue.shift();
+            const currentNodeId = path[path.length - 1];
+
+            // Get neighbors
+            const neighbors = this.adjacencyList.get(currentNodeId) || [];
+
+            for (const neighborId of neighbors) {
+                if (visited.has(neighborId)) continue;
+
+                const newPath = [...path, neighborId];
+
+                // Found the target
+                if (neighborId === endNodeId) {
+                    return newPath;
+                }
+
+                visited.add(neighborId);
+                queue.push(newPath);
+            }
+        }
+
+        return null; // No path found
+    }
+
+    /**
+     * Find shortest path from any allocated node to target node
+     * Returns {path: [], cost: number, startNodeId: string} or null
+     */
+    findPathToNode(targetNodeId) {
+        if (!this.treeData?.nodes) return null;
+
+        // If target is already allocated, no path needed
+        if (this.allocatedNodes.has(targetNodeId)) {
+            return { path: [targetNodeId], cost: 0, startNodeId: targetNodeId };
+        }
+
+        let shortestPath = null;
+        let minCost = Infinity;
+        let bestStartNodeId = null;
+
+        // Try to find path from each allocated node
+        this.allocatedNodes.forEach(allocatedNodeId => {
+            const path = this.findShortestPath(allocatedNodeId, targetNodeId);
+
+            if (path) {
+                const cost = this.getPathCost(path);
+
+                if (cost < minCost) {
+                    minCost = cost;
+                    shortestPath = path;
+                    bestStartNodeId = allocatedNodeId;
+                }
+            }
+        });
+
+        if (shortestPath) {
+            return {
+                path: shortestPath,
+                cost: minCost,
+                startNodeId: bestStartNodeId
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Calculate point cost of a path
+     * Excludes already allocated nodes, class starts, and masteries
+     */
+    getPathCost(path) {
+        if (!path || !this.treeData?.nodes) return 0;
+
+        let cost = 0;
+
+        path.forEach(nodeId => {
+            // Skip already allocated nodes
+            if (this.allocatedNodes.has(nodeId)) return;
+
+            const node = this.treeData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            // Skip free nodes (POE official rules)
+            if (node.type === 'classStart') return; // Class start is free
+            if (node.type === 'mastery') return; // Masteries are free
+
+            cost++;
+        });
+
+        return cost;
     }
 
     /**
