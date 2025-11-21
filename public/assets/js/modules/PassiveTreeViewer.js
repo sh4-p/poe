@@ -111,6 +111,9 @@ export class PassiveTreeViewer {
         this.animationTime = 0;
         this.isAnimating = false;
 
+        // Build management
+        this.currentBuildName = null;
+
         // Tile grid for optimization
         this.tiles = new Map();
         this.dirtyTiles = new Set();
@@ -1847,9 +1850,168 @@ export class PassiveTreeViewer {
     }
 
     /**
+     * Save current build to localStorage
+     */
+    saveBuild(buildName) {
+        if (!buildName || !buildName.trim()) {
+            buildName = prompt('Enter build name:');
+            if (!buildName) return;
+        }
+
+        const build = {
+            name: buildName,
+            class: this.selectedClass?.id || null,
+            allocatedNodes: Array.from(this.allocatedNodes),
+            timestamp: Date.now(),
+            version: '1.0'
+        };
+
+        // Get existing builds
+        const builds = this.getSavedBuilds();
+
+        // Add or update build
+        builds[buildName] = build;
+
+        // Save to localStorage
+        localStorage.setItem('poe_passive_builds', JSON.stringify(builds));
+
+        this.currentBuildName = buildName;
+        showToast(`Build "${buildName}" saved!`, 'success');
+
+        return build;
+    }
+
+    /**
+     * Load build from localStorage
+     */
+    loadBuild(buildName) {
+        const builds = this.getSavedBuilds();
+        const build = builds[buildName];
+
+        if (!build) {
+            showToast(`Build "${buildName}" not found`, 'error');
+            return false;
+        }
+
+        // Reset current tree
+        this.allocatedNodes.clear();
+
+        // Load class
+        if (build.class) {
+            this.selectClass(build.class);
+        }
+
+        // Load allocated nodes
+        build.allocatedNodes.forEach(nodeId => {
+            this.allocatedNodes.add(nodeId);
+        });
+
+        this.currentBuildName = buildName;
+        this.updatePointsDisplay();
+        this.render();
+
+        showToast(`Build "${buildName}" loaded!`, 'success');
+        return true;
+    }
+
+    /**
+     * Get all saved builds
+     */
+    getSavedBuilds() {
+        const data = localStorage.getItem('poe_passive_builds');
+        return data ? JSON.parse(data) : {};
+    }
+
+    /**
+     * Delete saved build
+     */
+    deleteBuild(buildName) {
+        const builds = this.getSavedBuilds();
+
+        if (!builds[buildName]) {
+            showToast(`Build "${buildName}" not found`, 'error');
+            return false;
+        }
+
+        delete builds[buildName];
+        localStorage.setItem('poe_passive_builds', JSON.stringify(builds));
+
+        if (this.currentBuildName === buildName) {
+            this.currentBuildName = null;
+        }
+
+        showToast(`Build "${buildName}" deleted!`, 'success');
+        return true;
+    }
+
+    /**
+     * Export build as JSON
+     */
+    exportBuild() {
+        const build = {
+            name: this.currentBuildName || 'Unnamed Build',
+            class: this.selectedClass?.id || null,
+            allocatedNodes: Array.from(this.allocatedNodes),
+            timestamp: Date.now(),
+            version: '1.0'
+        };
+
+        const json = JSON.stringify(build, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${build.name.replace(/[^a-z0-9]/gi, '_')}.json`;
+        a.click();
+
+        URL.revokeObjectURL(url);
+        showToast('Build exported!', 'success');
+    }
+
+    /**
+     * Import build from JSON
+     */
+    importBuild(jsonString) {
+        try {
+            const build = JSON.parse(jsonString);
+
+            // Validate build structure
+            if (!build.allocatedNodes || !Array.isArray(build.allocatedNodes)) {
+                throw new Error('Invalid build format');
+            }
+
+            // Reset tree
+            this.allocatedNodes.clear();
+
+            // Load class
+            if (build.class) {
+                this.selectClass(build.class);
+            }
+
+            // Load nodes
+            build.allocatedNodes.forEach(nodeId => {
+                this.allocatedNodes.add(nodeId);
+            });
+
+            this.currentBuildName = build.name || 'Imported Build';
+            this.updatePointsDisplay();
+            this.render();
+
+            showToast('Build imported successfully!', 'success');
+            return true;
+
+        } catch (error) {
+            showToast('Failed to import build: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    /**
      * Destroy viewer
      */
     destroy() {
+        this.stopAnimation();
         this.container.innerHTML = '';
     }
 }
