@@ -104,6 +104,7 @@ export class PassiveTreeViewer {
         this.spriteImages = new Map();
         this.loadingPromises = new Map();
         this.spritesLoaded = false;
+        this.backgroundPattern = null;
 
         // Tile grid for optimization
         this.tiles = new Map();
@@ -606,9 +607,12 @@ export class PassiveTreeViewer {
      * Render main canvas (background + nodes + connections)
      */
     renderMainLayer() {
-        // Clear
+        // Clear with black
         this.mainCtx.fillStyle = '#000000';
         this.mainCtx.fillRect(0, 0, this.options.width, this.options.height);
+
+        // Draw background pattern
+        this.renderBackground();
 
         if (!this.treeData) return;
 
@@ -619,7 +623,10 @@ export class PassiveTreeViewer {
         this.mainCtx.translate(this.viewport.x, this.viewport.y);
         this.mainCtx.scale(this.viewport.scale, this.viewport.scale);
 
-        // Render connections first
+        // Render group backgrounds
+        this.renderGroupBackgrounds(this.mainCtx);
+
+        // Render connections
         this.renderConnections(this.mainCtx);
 
         // Render nodes
@@ -627,6 +634,111 @@ export class PassiveTreeViewer {
 
         // Restore context
         this.mainCtx.restore();
+    }
+
+    /**
+     * Render background texture pattern
+     */
+    renderBackground() {
+        // Create background pattern if not exists
+        if (!this.backgroundPattern && this.sprites?.background) {
+            const zoomKey = String(this.zoomLevels[this.options.spriteZoomLevel]);
+            const bgData = this.sprites.background[zoomKey];
+
+            if (bgData) {
+                const cdnUrl = bgData.filename;
+                const urlMatch = cdnUrl?.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+
+                if (urlMatch) {
+                    const localFileName = urlMatch[1];
+                    const bgUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+                    if (this.spriteImages.has(bgUrl)) {
+                        const bgImage = this.spriteImages.get(bgUrl);
+                        const coords = bgData.coords?.['Background2'];
+
+                        if (coords) {
+                            // Create pattern from background tile
+                            const tempCanvas = document.createElement('canvas');
+                            tempCanvas.width = coords.w;
+                            tempCanvas.height = coords.h;
+                            const tempCtx = tempCanvas.getContext('2d');
+
+                            tempCtx.drawImage(
+                                bgImage,
+                                coords.x, coords.y, coords.w, coords.h,
+                                0, 0, coords.w, coords.h
+                            );
+
+                            this.backgroundPattern = this.mainCtx.createPattern(tempCanvas, 'repeat');
+                        }
+                    } else {
+                        // Load background image
+                        this.loadImage(bgUrl).then(() => {
+                            requestAnimationFrame(() => this.render());
+                        }).catch(() => {});
+                    }
+                }
+            }
+        }
+
+        // Fill with pattern
+        if (this.backgroundPattern) {
+            this.mainCtx.fillStyle = this.backgroundPattern;
+            this.mainCtx.fillRect(0, 0, this.options.width, this.options.height);
+        }
+    }
+
+    /**
+     * Render group background circles
+     */
+    renderGroupBackgrounds(ctx) {
+        if (!this.sprites?.groupBackground || !this.rawTreeData?.groups) return;
+
+        const zoomKey = String(this.zoomLevels[this.options.spriteZoomLevel]);
+        const gbData = this.sprites.groupBackground[zoomKey];
+
+        if (!gbData) return;
+
+        const cdnUrl = gbData.filename;
+        const urlMatch = cdnUrl?.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+        if (!urlMatch) return;
+
+        const localFileName = urlMatch[1];
+        const gbUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+        if (!this.spriteImages.has(gbUrl)) {
+            // Load group background image
+            this.loadImage(gbUrl).then(() => {
+                requestAnimationFrame(() => this.render());
+            }).catch(() => {});
+            return;
+        }
+
+        const gbImage = this.spriteImages.get(gbUrl);
+
+        // Render group backgrounds for each group
+        Object.values(this.rawTreeData.groups).forEach(group => {
+            if (!group.x || !group.y) return;
+
+            // Get appropriate background sprite based on group orbit count
+            const groupBgName = group.orbits?.length > 3 ? 'PSGroupBackground3' : 'PSGroupBackground1';
+            const coords = gbData.coords?.[groupBgName];
+
+            if (coords) {
+                const scale = 1.0; // Adjust as needed
+                const w = coords.w * scale;
+                const h = coords.h * scale;
+
+                ctx.globalAlpha = 0.3; // Semi-transparent
+                ctx.drawImage(
+                    gbImage,
+                    coords.x, coords.y, coords.w, coords.h,
+                    group.x - w/2, group.y - h/2, w, h
+                );
+                ctx.globalAlpha = 1.0;
+            }
+        });
     }
 
     /**
@@ -839,13 +951,26 @@ export class PassiveTreeViewer {
             } else if (node.type === 'normal') {
                 spriteSheetName = isAllocated ? 'normalActive' : 'normalInactive';
             } else if (node.type === 'mastery') {
-                spriteSheetName = isAllocated ? 'masteryActiveSelected' : 'mastery';
+                // Mastery nodes have multiple states
+                if (isAllocated) {
+                    spriteSheetName = 'masteryActiveSelected';
+                } else if (this.isMasteryConnected(node)) {
+                    spriteSheetName = 'masteryConnected';
+                } else {
+                    spriteSheetName = 'masteryInactive';
+                }
             } else if (node.type === 'jewel') {
-                // Jewels use different sprite handling (TODO)
-                return false;
+                // Jewels use special sprite sheet
+                return this.renderJewelSocket(ctx, node, isAllocated, isHovered);
+            } else if (node.type === 'ascendancy') {
+                // Ascendancy nodes use normal sprite sheets but may have special icons
+                spriteSheetName = isAllocated ? 'notableActive' : 'notableInactive';
+            } else if (node.type === 'bloodline') {
+                // Bloodline nodes similar to normal nodes
+                spriteSheetName = isAllocated ? 'normalActive' : 'normalInactive';
             } else if (node.type === 'classStart') {
-                // Class start nodes are special (TODO)
-                return false;
+                // Class start nodes use ascendancy sprite sheet for class icons
+                return this.renderClassStart(ctx, node);
             }
 
             // Get sprite sheet metadata - zoom keys are STRINGS
@@ -916,23 +1041,8 @@ export class PassiveTreeViewer {
                 // Restore context (remove clip)
                 ctx.restore();
 
-                // Draw circular frame/border overlay
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, nodeRadius, 0, Math.PI * 2);
-
-                if (isAllocated) {
-                    ctx.strokeStyle = '#f59e0b'; // Gold border for allocated
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                } else if (isHovered) {
-                    ctx.strokeStyle = '#888'; // Gray border for hover
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                } else {
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; // Subtle border for unallocated
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                }
+                // Draw frame overlay (POE official frames)
+                this.renderNodeFrame(ctx, node, isAllocated, isHovered);
 
                 return true; // Sprite rendered successfully
 
@@ -954,6 +1064,267 @@ export class PassiveTreeViewer {
 
         } catch (error) {
             return false;
+        }
+    }
+
+    /**
+     * Render class start node (large class icon)
+     */
+    renderClassStart(ctx, node) {
+        if (!this.sprites?.ascendancy) return false;
+
+        try {
+            // Map node to class name
+            const classNames = {
+                '26725': 'Ascendant',  // Scion
+                '4': 'Marauder',
+                '48679': 'Ranger',
+                '41529': 'Witch',
+                '55549': 'Duelist',
+                '36634': 'Templar',
+                '26196': 'Shadow'
+            };
+
+            const className = classNames[node.id];
+            if (!className) return false;
+
+            const ascendancySpriteName = `Classes${className}`;
+
+            const zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+            const zoomKey = String(zoomLevels[this.options.spriteZoomLevel]);
+
+            const ascendancyData = this.sprites.ascendancy[zoomKey];
+            if (!ascendancyData) return false;
+
+            const coords = ascendancyData.coords?.[ascendancySpriteName];
+            if (!coords) return false;
+
+            // Extract filename
+            const cdnUrl = ascendancyData.filename;
+            if (!cdnUrl) return false;
+
+            const urlMatch = cdnUrl.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+            if (!urlMatch) return false;
+
+            const localFileName = urlMatch[1];
+            const ascendancyUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+            // Check if loaded
+            if (this.spriteImages.has(ascendancyUrl)) {
+                const classImage = this.spriteImages.get(ascendancyUrl);
+
+                const nodeRadius = (this.nodeSizes.classStart || 100) / 2;
+                const scale = (nodeRadius * 2) / Math.max(coords.w, coords.h);
+
+                const w = coords.w * scale;
+                const h = coords.h * scale;
+
+                // Draw class icon
+                ctx.drawImage(
+                    classImage,
+                    coords.x, coords.y, coords.w, coords.h,
+                    node.x - w/2, node.y - h/2, w, h
+                );
+
+                return true;
+            } else {
+                // Load ascendancy sprite
+                this.loadImage(ascendancyUrl).then(() => {
+                    if (!this.spritesLoaded) {
+                        requestAnimationFrame(() => this.render());
+                    }
+                }).catch(() => {});
+
+                return false;
+            }
+
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * Check if mastery node is connected (has adjacent allocated nodes)
+     */
+    isMasteryConnected(masteryNode) {
+        if (!this.treeData?.links) return false;
+
+        // Find all nodes connected to this mastery
+        const connectedNodeIds = this.treeData.links
+            .filter(link => link.source === masteryNode.id || link.target === masteryNode.id)
+            .map(link => link.source === masteryNode.id ? link.target : link.source);
+
+        // Check if any connected node is allocated
+        return connectedNodeIds.some(nodeId => this.allocatedNodes.has(nodeId));
+    }
+
+    /**
+     * Render jewel socket (special handling for jewel nodes)
+     */
+    renderJewelSocket(ctx, node, isAllocated, isHovered) {
+        if (!this.sprites?.jewel) return false;
+
+        try {
+            // Jewel sockets use different sprite naming
+            // Default to unallocated socket
+            let jewelSpriteName = 'JewelSocketNormal';
+
+            if (isAllocated) {
+                // Can check node.jewelData for specific types (red, blue, green, prismatic, etc.)
+                // For now, use default active
+                jewelSpriteName = 'JewelSocketActiveBlue'; // Default active jewel
+            }
+
+            const zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+            const zoomKey = String(zoomLevels[this.options.spriteZoomLevel]);
+
+            const jewelData = this.sprites.jewel[zoomKey];
+            if (!jewelData) return false;
+
+            const coords = jewelData.coords?.[jewelSpriteName];
+            if (!coords) {
+                // Try alternative names
+                const altNames = ['JewelSocketActivePrismaticAlt', 'JewelSocketActiveBlueAlt', 'JewelFrameAllocated'];
+                for (const altName of altNames) {
+                    if (jewelData.coords?.[altName]) {
+                        jewelSpriteName = altName;
+                        break;
+                    }
+                }
+
+                const finalCoords = jewelData.coords?.[jewelSpriteName];
+                if (!finalCoords) return false;
+            }
+
+            const finalCoords = jewelData.coords[jewelSpriteName];
+
+            // Extract filename from CDN URL
+            const cdnUrl = jewelData.filename;
+            if (!cdnUrl) return false;
+
+            const urlMatch = cdnUrl.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+            if (!urlMatch) return false;
+
+            const localFileName = urlMatch[1];
+            const jewelUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+            // Check if jewel image is loaded
+            if (this.spriteImages.has(jewelUrl)) {
+                const jewelImage = this.spriteImages.get(jewelUrl);
+
+                const nodeRadius = (this.nodeSizes.jewel || this.nodeSizes.normal) / 2;
+                const jewelScale = (nodeRadius * 2) / Math.max(finalCoords.w, finalCoords.h);
+
+                const w = finalCoords.w * jewelScale;
+                const h = finalCoords.h * jewelScale;
+
+                // Draw jewel sprite (no circular clip needed for jewels)
+                ctx.drawImage(
+                    jewelImage,
+                    finalCoords.x, finalCoords.y, finalCoords.w, finalCoords.h,
+                    node.x - w/2, node.y - h/2, w, h
+                );
+
+                return true;
+            } else {
+                // Load jewel sprite
+                this.loadImage(jewelUrl).then(() => {
+                    if (!this.spritesLoaded) {
+                        requestAnimationFrame(() => this.render());
+                    }
+                }).catch(() => {});
+
+                return false;
+            }
+
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * Render node frame overlay (GGG official frames)
+     */
+    renderNodeFrame(ctx, node, isAllocated, isHovered) {
+        if (!this.sprites?.frame) return;
+
+        try {
+            // Determine frame name based on node type and state
+            let frameName = null;
+
+            if (node.type === 'keystone') {
+                if (isAllocated) {
+                    frameName = 'KeystoneFrameAllocated';
+                } else {
+                    frameName = 'KeystoneFrameUnallocated';
+                }
+            } else if (node.type === 'notable') {
+                if (isAllocated) {
+                    frameName = 'NotableFrameAllocated';
+                } else {
+                    frameName = 'NotableFrameUnallocated';
+                }
+            } else if (node.type === 'normal') {
+                // Normal nodes don't typically have frames in POE
+                return;
+            } else if (node.type === 'jewel') {
+                // Jewel frames handled separately
+                return;
+            }
+
+            if (!frameName) return;
+
+            // Get frame sprite metadata
+            const zoomLevels = [0.1246, 0.2109, 0.2972, 0.3835];
+            const zoomKey = String(zoomLevels[this.options.spriteZoomLevel]);
+
+            const frameData = this.sprites.frame[zoomKey];
+            if (!frameData) return;
+
+            const coords = frameData.coords?.[frameName];
+            if (!coords) return;
+
+            // Extract filename from CDN URL
+            const cdnUrl = frameData.filename;
+            if (!cdnUrl) return;
+
+            const urlMatch = cdnUrl.match(/\/([^\/]+\.(?:jpg|png|webp))(?:\?|$)/i);
+            if (!urlMatch) return;
+
+            const localFileName = urlMatch[1];
+            const frameUrl = `${this.options.assetBaseUrl}${localFileName}`;
+
+            // Check if frame image is already loaded
+            if (this.spriteImages.has(frameUrl)) {
+                const frameImage = this.spriteImages.get(frameUrl);
+
+                // Calculate scale to match node size
+                const nodeRadius = (this.nodeSizes[node.type] || this.nodeSizes.normal) / 2;
+                const frameScale = (nodeRadius * 2.2) / Math.max(coords.w, coords.h); // Slightly larger than node
+
+                const w = coords.w * frameScale;
+                const h = coords.h * frameScale;
+
+                // Draw frame (centered on node)
+                ctx.drawImage(
+                    frameImage,
+                    coords.x, coords.y, coords.w, coords.h, // Source
+                    node.x - w/2, node.y - h/2, w, h         // Destination
+                );
+            } else {
+                // Start loading the frame image
+                this.loadImage(frameUrl).then(() => {
+                    // Re-render when frame loads
+                    if (!this.spritesLoaded) {
+                        requestAnimationFrame(() => this.render());
+                    }
+                }).catch(() => {
+                    // Silently fail
+                });
+            }
+
+        } catch (error) {
+            // Silently fail - frames are optional
         }
     }
 
